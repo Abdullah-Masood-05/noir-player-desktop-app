@@ -1,0 +1,6 @@
+/target
+.env
+err.txt
+out.txt
+screenshot*.png
+shot*.png

@@ -1,0 +1,439 @@
+use gpui_kit::assets::IconName as MusicIcon;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::*;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
+
+use crate::app::{store, Collection, LibraryTab, NoirPlayerModel};
+use crate::media::Track;
+use crate::views::ui::{
+    bg_color, format_duration, icon_text, img_from_bytes, red, red_a, selected_highlight,
+    smooth_scroll, surface, tab_transition, white,
+};
+
+pub fn top_fade() -> Div {
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .h(px(160.0))
+        .bg(linear_gradient(
+            180.0,
+            linear_color_stop(red_a(0.20), 0.0),
+            linear_color_stop(bg_color(), 1.0),
+        ))
+}
+
+pub fn app_bar(title: &str) -> Div {
+    h_flex()
+        .w_full()
+        .h(px(56.0))
+        .px(px(16.0))
+        .items_center()
+        .flex_shrink_0()
+        .child(div().w(px(30.0)))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_center()
+                .text_lg()
+                .font_weight(FontWeight::BOLD)
+                .text_color(white(1.0))
+                .child(title.to_string()),
+        )
+        .child(div().w(px(30.0)))
+}
+
+pub fn song_row(
+    model: &NoirPlayerModel,
+    index: usize,
+    queue: Vec<usize>,
+    playlist: Option<String>,
+    cx: &mut Context<NoirPlayerModel>,
+) -> AnyElement {
+    let Some(track) = model.tracks.get(index) else {
+        return div().into_any_element();
+    };
+    let is_current = model.current == Some(index);
+    let favourite = model.is_favourite(index);
+    let remove_path = track.path.clone();
+    h_flex()
+        .id(format!("song-{index}"))
+        .items_center()
+        .gap(px(10.0))
+        .px(px(10.0))
+        .py(px(7.0))
+        .rounded_lg()
+        .hover(|s| s.bg(surface()))
+        .when(is_current, |d| d.bg(red_a(0.10)))
+        .child(
+            h_flex()
+                .id(format!("play-song-{index}"))
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .gap(px(14.0))
+                .cursor_pointer()
+                .on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.play_collection(queue.clone(), index, cx)
+                    }),
+                )
+                .child(artwork_thumb(track, 48.0))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .when(is_current, |d| d.text_color(red()))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(track.title.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(white(0.55))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(format!("{} · {}", track.artist, track.album)),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_xs()
+                        .text_color(white(0.65))
+                        .child(format_duration(track.duration)),
+                ),
+        )
+        .child(
+            div()
+                .id(format!("favourite-{index}"))
+                .flex_shrink_0()
+                .p(px(6.0))
+                .rounded_md()
+                .cursor_pointer()
+                .bg(if favourite { red_a(0.18) } else { surface() })
+                .text_color(if favourite { red() } else { white(0.45) })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.toggle_favourite(index, cx);
+                }))
+                .child(icon_text(MusicIcon::Heart, 28.0)),
+        )
+        .child(
+            Button::new(format!("add-song-{index}"))
+                .label("Add")
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.add_to_playlist_dialog(index, window, cx);
+                })),
+        )
+        .when_some(playlist, |row, name| {
+            row.child(
+                Button::new(format!("remove-song-{index}"))
+                    .label("Remove")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.remove_from_playlist(&name, &remove_path, cx);
+                    })),
+            )
+        })
+        .into_any_element()
+}
+
+pub fn artwork_thumb(track: &Track, size: f32) -> AnyElement {
+    match &track.artwork {
+        Some(bytes) => img_from_bytes(bytes.clone())
+            .size(px(size))
+            .rounded_lg()
+            .flex_shrink_0()
+            .into_any_element(),
+        None => div()
+            .size(px(size))
+            .rounded_lg()
+            .flex_shrink_0()
+            .bg(red_a(0.12))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(red())
+            .child(icon_text(MusicIcon::Music4, size))
+            .into_any_element(),
+    }
+}
+
+pub fn empty_state(msg: &str, sub: &str) -> Div {
+    v_flex()
+        .flex_1()
+        .min_h_0()
+        .items_center()
+        .justify_center()
+        .gap(px(10.0))
+        .p(px(16.0))
+        .child(
+            div()
+                .text_color(white(0.2))
+                .child(icon_text(MusicIcon::Music4, 64.0)),
+        )
+        .child(
+            div()
+                .text_base()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(white(0.8))
+                .child(msg.to_string()),
+        )
+        .child(
+            div()
+                .text_sm()
+                .text_color(white(0.45))
+                .child(sub.to_string()),
+        )
+}
+
+pub fn track_list(
+    model: &NoirPlayerModel,
+    indices: Vec<usize>,
+    playlist: Option<String>,
+    cx: &mut Context<NoirPlayerModel>,
+) -> AnyElement {
+    if indices.is_empty() {
+        return empty_state(
+            "No matching songs",
+            "Search another title, artist or album, or add songs to this collection.",
+        )
+        .into_any_element();
+    }
+    smooth_scroll(
+        format!(
+            "songs-scroll-{:?}-{:?}",
+            model.library_tab, model.library_detail
+        ),
+        div().px(px(8.0)).pb(px(12.0)).children(
+            indices
+                .iter()
+                .map(|&index| song_row(model, index, indices.clone(), playlist.clone(), cx)),
+        ),
+    )
+    .into_any_element()
+}
+
+pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let tab = model.library_tab;
+    let detail = model.library_detail.clone();
+    let body = if let Some(collection) = detail.as_ref() {
+        let indices = model.filtered_indices(model.collection_indices(collection), cx);
+        track_list(model, indices, None, cx)
+    } else {
+        match tab {
+            LibraryTab::Music | LibraryTab::Favourites => {
+                let indices = if tab == LibraryTab::Favourites {
+                    store::resolve_paths(&model.store.favourites, &model.tracks)
+                } else {
+                    (0..model.tracks.len()).collect()
+                };
+                track_list(model, model.filtered_indices(indices, cx), None, cx)
+            }
+            LibraryTab::Albums | LibraryTab::Artists => {
+                let groups = if tab == LibraryTab::Albums {
+                    &model.albums
+                } else {
+                    &model.artists
+                };
+                let visible: Vec<_> = groups
+                    .iter()
+                    .filter_map(|(name, indices)| {
+                        let filtered = model.filtered_indices(indices.clone(), cx);
+                        (!filtered.is_empty()).then_some((name, filtered.len()))
+                    })
+                    .collect();
+                if visible.is_empty() {
+                    empty_state(
+                        "No matching collections",
+                        "Album and artist information comes from file tags.",
+                    )
+                    .into_any_element()
+                } else {
+                    smooth_scroll(
+                        "collections-scroll",
+                        div().child(h_flex().flex_wrap().gap(px(18.0)).p(px(14.0)).children(
+                            visible.into_iter().map(|(name, count)| {
+                                let collection = if tab == LibraryTab::Albums {
+                                    Collection::Album(name.clone())
+                                } else {
+                                    Collection::Artist(name.clone())
+                                };
+                                v_flex()
+                                    .id(format!("collection-{name}"))
+                                    .w(px(150.0))
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .cursor_pointer()
+                                    .hover(|s| s.opacity(0.85))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.library_detail = Some(collection.clone());
+                                        cx.notify();
+                                    }))
+                                    .child(
+                                        div()
+                                            .size(px(120.0))
+                                            .rounded_2xl()
+                                            .bg(red_a(0.12))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .text_color(red())
+                                            .child(icon_text(
+                                                if tab == LibraryTab::Albums {
+                                                    MusicIcon::Disc3
+                                                } else {
+                                                    MusicIcon::Mic
+                                                },
+                                                80.0,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .text_sm()
+                                            .text_center()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .child(name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(white(0.5))
+                                            .child(format!("{count} matching songs")),
+                                    )
+                            }),
+                        )),
+                    )
+                    .into_any_element()
+                }
+            }
+        }
+    };
+    v_flex()
+        .size_full()
+        .min_h_0()
+        .relative()
+        .child(top_fade())
+        .child(
+            v_flex()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .relative()
+                .child(app_bar(
+                    detail.as_ref().map(Collection::name).unwrap_or("Library"),
+                ))
+                .when(detail.is_none(), |d| d.child(tab_bar(tab, cx)))
+                .when(detail.is_some(), |d| {
+                    d.child(
+                        h_flex().flex_shrink_0().px(px(12.0)).child(
+                            Button::new("library-back")
+                                .label("Back")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.library_detail = None;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                })
+                .child(search_bar(model))
+                .child(
+                    h_flex()
+                        .flex_shrink_0()
+                        .px(px(12.0))
+                        .pb(px(8.0))
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(white(0.55))
+                                .child(model.status.clone()),
+                        )
+                        .child(
+                            Button::new("rescan-library")
+                                .label(if model.scanning {
+                                    "Scanning..."
+                                } else {
+                                    "Rescan"
+                                })
+                                .disabled(model.scanning)
+                                .on_click(cx.listener(|this, _, _, cx| this.rescan(cx))),
+                        ),
+                )
+                .child(tab_transition(
+                    format!("library-body-{tab:?}-{detail:?}"),
+                    body,
+                )),
+        )
+}
+
+pub fn tab_bar(active: LibraryTab, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let tabs = [
+        (LibraryTab::Music, "Music"),
+        (LibraryTab::Favourites, "Favourites"),
+        (LibraryTab::Albums, "Albums"),
+        (LibraryTab::Artists, "Artists"),
+    ];
+    h_flex()
+        .w_full()
+        .flex_shrink_0()
+        .children(tabs.map(|(tab, label)| {
+            let selected = active == tab;
+            h_flex()
+                .id(format!("libtab-{tab:?}"))
+                .flex_1()
+                .h(px(44.0))
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .relative()
+                .child(
+                    div()
+                        .text_sm()
+                        .when(selected, |d| {
+                            d.text_color(red()).font_weight(FontWeight::BOLD)
+                        })
+                        .when(!selected, |d| d.text_color(white(0.55)))
+                        .child(label),
+                )
+                .child(selected_highlight(
+                    format!("library-highlight-{tab:?}"),
+                    selected,
+                    div()
+                        .absolute()
+                        .bottom_0()
+                        .left(px(24.0))
+                        .right(px(24.0))
+                        .h(px(2.5))
+                        .rounded_full(),
+                ))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.library_tab = tab;
+                    this.library_detail = None;
+                    cx.notify();
+                }))
+        }))
+}
+
+pub fn search_bar(model: &NoirPlayerModel) -> Div {
+    div()
+        .m(px(12.0))
+        .flex_shrink_0()
+        .child(Input::new(&model.library_search))
+}

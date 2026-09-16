@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
+jobs:
+  checks:
+    name: Checks (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Reject a tracked local environment file
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo '::error::Remove .env from the index and rotate any exposed credentials before building.'
+            exit 1
+          fi
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config clang libclang-dev \
+            libfontconfig-dev libwayland-dev libwebkit2gtk-4.1-dev \
+            libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev \
+            vulkan-validationlayers libvulkan1 libasound2-dev
+      - name: Check Apple SDK and Metal tools
+        if: runner.os == 'macOS'
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --find metal
+          xcrun --sdk macosx --find metallib
+          echo "BINDGEN_EXTRA_CLANG_ARGS=--sysroot=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustup target add "${{ matrix.target }}"
+          rustc --version --verbose
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-${{ matrix.target }}
+          cache-on-failure: false
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Typecheck
+        run: cargo check --locked --all-targets --target "${{ matrix.target }}"
+      - name: Build
+        run: cargo build --locked --target "${{ matrix.target }}"
+      - name: Test without service credentials
+        run: cargo test --locked --all-targets --target "${{ matrix.target }}"
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --target "${{ matrix.target }}" -- -D warnings

@@ -1,0 +1,310 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      create_draft:
+        description: Create a draft after checks and release-draft environment approval; run against an existing v* tag
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate tag, version and notes
+        id: version
+        env:
+          RELEASE_REF: ${{ github.ref }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import tomllib
+          manifest = tomllib.loads(pathlib.Path('Cargo.toml').read_text())
+          version = manifest['package']['version']
+          assert re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', version), 'Unsupported release version'
+          assert os.environ['RELEASE_REF'] == f'refs/tags/v{version}', 'Select an existing tag matching Cargo.toml, not a branch'
+          notes = pathlib.Path('CHANGELOG.md').read_text()
+          section = re.search(r'^## \[' + re.escape(version) + r'\][^\n]*\n(.*?)(?=^## |\Z)', notes, re.M | re.S)
+          assert section and section.group(1).strip(), 'Missing version-scoped changelog notes'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version={version}\n')
+          PY
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+  package:
+    needs: [validate, checks]
+    name: Package (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: windows-x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            platform: macos-arm64
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux-x64
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      TARGET: ${{ matrix.target }}
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux build and packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config clang libclang-dev \
+            libfontconfig-dev libwayland-dev libwebkit2gtk-4.1-dev \
+            libxkbcommon-x11-dev libx11-xcb-dev libssl-dev libzstd-dev \
+            vulkan-validationlayers libvulkan1 libasound2-dev \
+            dpkg-dev fakeroot desktop-file-utils
+      - name: Check Apple SDK and Metal tools
+        if: runner.os == 'macOS'
+        run: |
+          xcodebuild -version
+          xcrun --sdk macosx --find metal
+          xcrun --sdk macosx --find metallib
+          echo "BINDGEN_EXTRA_CLANG_ARGS=--sysroot=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> "$GITHUB_ENV"
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "$TARGET"
+          rustc --version --verbose
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+          cache-on-failure: false
+      - name: Build locked release binary
+        run: cargo build --release --locked --target "$TARGET"
+      - name: Install pinned cargo-bundle and prepare offline metadata
+        if: runner.os != 'Windows'
+        run: |
+          cargo install cargo-bundle --version 0.11.0 --locked
+          cargo fetch --locked
+      - name: Package Windows executable
+        if: runner.os == 'Windows'
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import struct
+          import zipfile
+          binary = pathlib.Path('target') / os.environ['TARGET'] / 'release/noir_player.exe'
+          data = binary.read_bytes()
+          offset = struct.unpack_from('<I', data, 0x3c)[0]
+          assert data[offset:offset + 4] == b'PE\0\0'
+          assert struct.unpack_from('<H', data, offset + 4)[0] == 0x8664, 'Expected x64 PE'
+          pathlib.Path('dist').mkdir(exist_ok=True)
+          name = f"noir-player-{os.environ['VERSION']}-windows-x64.zip"
+          with zipfile.ZipFile(pathlib.Path('dist') / name, 'w', zipfile.ZIP_DEFLATED) as archive:
+              archive.write(binary, 'noir_player.exe')
+          with zipfile.ZipFile(pathlib.Path('dist') / name) as archive:
+              assert archive.namelist() == ['noir_player.exe']
+              assert archive.testzip() is None
+          PY
+      - name: Bundle macOS application
+        if: runner.os == 'macOS'
+        env:
+          CARGO_BUNDLE_SKIP_BUILD: 'true'
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          cargo bundle --release --target "$TARGET" --format osx
+          python - <<'PY'
+          import os
+          import pathlib
+          import plistlib
+          import subprocess
+          import tarfile
+          app = pathlib.Path('target') / os.environ['TARGET'] / 'release/bundle/osx/Noir Player.app'
+          plist_path = app / 'Contents/Info.plist'
+          info = plistlib.loads(plist_path.read_bytes())
+          assert info['CFBundleIdentifier'] == 'app.noirplayer.desktop'
+          assert info['CFBundleShortVersionString'] == os.environ['VERSION']
+          executable = app / 'Contents/MacOS' / info['CFBundleExecutable']
+          assert subprocess.check_output(['lipo', '-archs', str(executable)], text=True).strip() == 'arm64'
+          assert (app / 'Contents/Resources' / info['CFBundleIconFile']).is_file()
+          info['LSMinimumSystemVersion'] = '14.0'
+          plist_path.write_bytes(plistlib.dumps(info))
+          subprocess.run(['plutil', '-lint', str(plist_path)], check=True)
+          pathlib.Path('dist').mkdir(exist_ok=True)
+          name = f"noir-player-{os.environ['VERSION']}-macos-arm64.tar.gz"
+          with tarfile.open(pathlib.Path('dist') / name, 'w:gz') as archive:
+              archive.add(app, arcname=app.name)
+          with tarfile.open(pathlib.Path('dist') / name) as archive:
+              assert any(member.name.endswith('/Contents/MacOS/noir_player') for member in archive)
+          PY
+      - name: Bundle and validate Debian package
+        if: runner.os == 'Linux'
+        env:
+          CARGO_BUNDLE_SKIP_BUILD: 'true'
+          CARGO_NET_OFFLINE: 'true'
+        run: |
+          cargo bundle --release --target "$TARGET" --format deb
+          python - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import re
+          import subprocess
+          import tomllib
+          manifest = tomllib.loads(pathlib.Path('Cargo.toml').read_text())
+          app_id = manifest['package']['metadata']['bundle']['identifier']
+          assert app_id == 'app.noirplayer.desktop'
+          main = pathlib.Path('src/main.rs').read_text()
+          assert re.search(r'app_id:\s*Some\("' + re.escape(app_id) + r'"\.into\(\)\)', main), 'GPUI app_id must match desktop identity'
+          release = pathlib.Path('target') / os.environ['TARGET'] / 'release'
+          packages = list((release / 'bundle/deb').glob('*.deb'))
+          assert len(packages) == 1, 'Expected exactly one bundle'
+          staging = pathlib.Path(os.environ['RUNNER_TEMP']) / 'noir-deb'
+          subprocess.run(['dpkg-deb', '--raw-extract', str(packages[0]), str(staging)], check=True)
+          desktop = staging / 'usr/share/applications/noir_player.desktop'
+          text = desktop.read_text().replace('Icon=noir_player', f'Icon={app_id}')
+          desktop.unlink()
+          desktop = desktop.with_name(f'{app_id}.desktop')
+          desktop.write_text(text + f'StartupWMClass={app_id}\n')
+          icons = list((staging / 'usr/share/icons/hicolor').glob('*/apps/noir_player.png'))
+          assert icons, 'Missing desktop PNG icon'
+          for icon in icons:
+              icon.rename(icon.with_name(f'{app_id}.png'))
+          subprocess.run(['desktop-file-validate', str(desktop)], check=True)
+          binary = staging / 'usr/bin/noir_player'
+          elf = subprocess.check_output(['readelf', '-h', str(binary)], text=True)
+          assert 'Advanced Micro Devices X86-64' in elf
+          control = staging / 'DEBIAN/control'
+          metadata = control.read_text()
+          analysis = pathlib.Path(os.environ['RUNNER_TEMP']) / 'noir-shlibs'
+          (analysis / 'debian').mkdir(parents=True)
+          (analysis / 'debian/control').write_text('Source: noir-player\n\n' + metadata)
+          result = subprocess.check_output(['dpkg-shlibdeps', '-O', '-e' + str(binary)], cwd=analysis, text=True)
+          depends = next(line.removeprefix('shlibs:Depends=') for line in result.splitlines() if line.startswith('shlibs:Depends='))
+          dynamic = ['libvulkan1', 'libwayland-client0', 'libxkbcommon0', 'libxkbcommon-x11-0']
+          subprocess.run(['dpkg-query', '-W', *dynamic], check=True)
+          depends = ', '.join(sorted(set(depends.split(', ') + dynamic)))
+          metadata = re.sub(r'^Depends:.*\n', '', metadata, flags=re.M)
+          control.write_text(metadata + f'Depends: {depends}\n')
+          with (staging / 'DEBIAN/md5sums').open('w') as sums:
+              for path in sorted((staging / 'usr').rglob('*')):
+                  if path.is_file():
+                      sums.write(f'{hashlib.md5(path.read_bytes()).hexdigest()}  {path.relative_to(staging).as_posix()}\n')
+          pathlib.Path('dist').mkdir(exist_ok=True)
+          output = pathlib.Path('dist') / f"noir-player-{os.environ['VERSION']}-linux-x64.deb"
+          subprocess.run(['dpkg-deb', '--build', '--root-owner-group', str(staging), str(output)], check=True)
+          assert subprocess.check_output(['dpkg-deb', '-f', str(output), 'Architecture'], text=True).strip() == 'amd64'
+          assert subprocess.check_output(['dpkg-deb', '-f', str(output), 'Version'], text=True).strip() == os.environ['VERSION']
+          subprocess.run(['dpkg-deb', '--info', str(output)], check=True)
+          subprocess.run(['dpkg-deb', '--contents', str(output)], check=True)
+          PY
+      - name: Check lockfile and write SHA256 sidecar
+        run: |
+          git diff --exit-code -- Cargo.lock Cargo.toml
+          python - <<'PY'
+          import hashlib
+          import pathlib
+          files = list(pathlib.Path('dist').iterdir())
+          assert len(files) == 1 and files[0].stat().st_size > 0
+          asset = files[0]
+          digest = hashlib.file_digest(asset.open('rb'), 'sha256').hexdigest()
+          asset.with_name(asset.name + '.sha256').write_text(f'{digest}  {asset.name}\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: noir-player-${{ matrix.platform }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+  draft:
+    needs: [validate, checks, package]
+    if: github.repository == 'Abdullah-Masood-05/noir-player-desktop-app' && (github.event_name == 'push' || inputs.create_draft)
+    runs-on: ubuntu-24.04
+    environment: release-draft
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: noir-player-*
+          path: dist
+          merge-multiple: true
+      - name: Verify complete artifact set and extract release notes
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import re
+          version = os.environ['VERSION']
+          expected = [f'noir-player-{version}-{suffix}' for suffix in ('windows-x64.zip', 'macos-arm64.tar.gz', 'linux-x64.deb')]
+          folder = pathlib.Path('dist')
+          assert {path.name for path in folder.iterdir()} == set(expected + [name + '.sha256' for name in expected]), 'Incomplete or unexpected assets'
+          sums = []
+          for name in sorted(expected):
+              asset = folder / name
+              assert asset.stat().st_size > 0
+              with asset.open('rb') as source:
+                  digest = hashlib.file_digest(source, 'sha256').hexdigest()
+              line = f'{digest}  {name}\n'
+              assert (folder / (name + '.sha256')).read_text() == line, f'Checksum mismatch: {name}'
+              sums.append(line)
+          (folder / 'SHA256SUMS').write_text(''.join(sums))
+          changelog = pathlib.Path('CHANGELOG.md').read_text()
+          match = re.search(r'^## \[' + re.escape(version) + r'\][^\n]*\n(.*?)(?=^## |\Z)', changelog, re.M | re.S)
+          assert match and match.group(1).strip()
+          pathlib.Path('release-notes.txt').write_text(match.group(1).strip() + '\n')
+          PY
+      - name: Create draft only
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo '::error::A release already exists. Review it manually; this workflow never replaces release assets.'
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" dist/*.zip dist/*.tar.gz dist/*.deb dist/SHA256SUMS \
+            --verify-tag --draft --title "Noir Player $VERSION" --notes-file release-notes.txt

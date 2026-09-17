@@ -22,7 +22,7 @@ This is the first documented desktop release. Version 1.1.3 follows the current 
 ### Downloads
 
 - Windows (x86_64): `noir-player-1.1.3-windows-x64.zip`, containing `noir_player.exe`
-- macOS (Apple Silicon): `noir-player-1.1.3-macos-arm64.tar.gz`, containing `Noir Player.app`
+- macOS (Apple Silicon): `noir-player-1.1.3-macos-arm64.dmg`
 - Linux (Debian and Ubuntu): `noir-player-1.1.3-linux-x64.deb`
 - Linux (Fedora and RHEL): `noir-player-1.1.3-linux-x64.rpm`
 - Linux (Arch): `noir-player-1.1.3-linux-x64.pkg.tar.zst`

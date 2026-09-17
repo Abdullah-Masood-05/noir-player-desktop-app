@@ -164,7 +164,6 @@ jobs:
           import pathlib
           import plistlib
           import subprocess
-          import tarfile
           app = pathlib.Path('target') / os.environ['TARGET'] / 'release/bundle/osx/Noir Player.app'
           plist_path = app / 'Contents/Info.plist'
           info = plistlib.loads(plist_path.read_bytes())
@@ -177,11 +176,26 @@ jobs:
           plist_path.write_bytes(plistlib.dumps(info))
           subprocess.run(['plutil', '-lint', str(plist_path)], check=True)
           pathlib.Path('dist').mkdir(exist_ok=True)
-          name = f"noir-player-{os.environ['VERSION']}-macos-arm64.tar.gz"
-          with tarfile.open(pathlib.Path('dist') / name, 'w:gz') as archive:
-              archive.add(app, arcname=app.name)
-          with tarfile.open(pathlib.Path('dist') / name) as archive:
-              assert any(member.name.endswith('/Contents/MacOS/noir_player') for member in archive)
+          dmg = pathlib.Path('dist') / f"noir-player-{os.environ['VERSION']}-macos-arm64.dmg"
+          staging = pathlib.Path(os.environ['RUNNER_TEMP']) / 'dmg-staging'
+          if staging.exists():
+              import shutil
+              shutil.rmtree(staging)
+          staging.mkdir()
+          staged_app = staging / 'Noir Player.app'
+          subprocess.run(['cp', '-r', str(app), str(staged_app)], check=True)
+          (staging / 'Applications').symlink_to('/Applications')
+          subprocess.run([
+              'hdiutil', 'create',
+              '-volname', 'Noir Player',
+              '-srcfolder', str(staging),
+              '-ov', '-format', 'UDZO',
+              str(dmg),
+          ], check=True)
+          assert dmg.exists() and dmg.stat().st_size > 0
+          info = subprocess.check_output(['hdiutil', 'info', '-plist', str(dmg)], text=True)
+          assert 'UDZO' in info
+          print(dmg)
           PY
       - name: Bundle and validate Debian package
         if: runner.os == 'Linux'
@@ -388,7 +402,7 @@ jobs:
           import pathlib
           import re
           version = os.environ['VERSION']
-          expected = [f'noir-player-{version}-{suffix}' for suffix in ('windows-x64.msi', 'windows-x64-setup.exe', 'macos-arm64.tar.gz', 'linux-x64.deb', 'linux-x64.rpm', 'linux-x64.pkg.tar.zst')]
+          expected = [f'noir-player-{version}-{suffix}' for suffix in ('windows-x64.msi', 'windows-x64-setup.exe', 'macos-arm64.dmg', 'linux-x64.deb', 'linux-x64.rpm', 'linux-x64.pkg.tar.zst')]
           folder = pathlib.Path('dist')
           assert {path.name for path in folder.iterdir()} == set(expected + [name + '.sha256' for name in expected]), 'Incomplete or unexpected assets'
           sums = []
@@ -412,5 +426,5 @@ jobs:
             echo '::error::A release already exists. Review it manually; this workflow never replaces release assets.'
             exit 1
           fi
-          gh release create "$RELEASE_TAG" dist/*.msi dist/*-setup.exe dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.sha256 dist/SHA256SUMS \
+          gh release create "$RELEASE_TAG" dist/*.msi dist/*-setup.exe dist/*.dmg dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.sha256 dist/SHA256SUMS \
             --verify-tag --draft --title "Noir Player $VERSION" --notes-file release-notes.txt

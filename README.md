@@ -128,7 +128,7 @@ The current workflow produces the following assets, where `VERSION` is the versi
 | Target | Runner | Artifact |
 | --- | --- | --- |
 | `x86_64-pc-windows-msvc` | `windows-2022` | `noir-player-VERSION-windows-x64.msi` and `noir-player-VERSION-windows-x64-setup.exe` |
-| `aarch64-apple-darwin` | `macos-14` | `noir-player-VERSION-macos-arm64.tar.gz`, containing `Noir Player.app` |
+| `aarch64-apple-darwin` | `macos-14` | `noir-player-VERSION-macos-arm64.dmg` |
 | `x86_64-unknown-linux-gnu` | `ubuntu-24.04` | `noir-player-VERSION-linux-x64.deb`, `.rpm` and `.pkg.tar.zst` |
 
 These are configured targets, not claims of successful builds or runtime tests. Linux and macOS remain unverified until their runners pass and the resulting packages receive manual smoke tests. Windows packages also need release-candidate testing. No installer signing, Apple notarization or automatic updates are configured. OS security warnings are expected for unsigned downloads.

@@ -4,3 +4,6 @@ err.txt
 out.txt
 screenshot*.png
 shot*.png
+dist/
+dist-*/
+ci-installers/

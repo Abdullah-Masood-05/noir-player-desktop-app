@@ -8,6 +8,19 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 This is the first documented desktop release. Version 1.1.3 follows the current Cargo manifest; no earlier desktop release history is asserted.
 
+### Downloads
+
+- Windows (x86_64): `noir-player-1.1.3-windows-x64.zip`, containing `noir_player.exe`
+- macOS (Apple Silicon): `noir-player-1.1.3-macos-arm64.tar.gz`, containing `Noir Player.app`
+- Linux (Debian and Ubuntu): `noir-player-1.1.3-linux-x64.deb`
+- Linux (Fedora and RHEL): `noir-player-1.1.3-linux-x64.rpm`
+- Linux (Arch): `noir-player-1.1.3-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or the combined `SHA256SUMS`
+
+Packages are unsigned. Windows may show a SmartScreen warning and macOS Gatekeeper will ask before the first launch.
+
+### What it includes
+
 - Native GPUI Kit interface with Library, Player, Playlists and Discover views.
 - Recursive scanning of the system Music folder, metadata and embedded artwork, title/artist/album search, and album and artist collections.
 - Local audio playback with seeking, volume, previous/next, shuffle and repeat-all.

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Noir Player
+Comment=Noir Player music player
+Exec=noir_player
+Icon=app.noirplayer.desktop
+Terminal=false
+Categories=Audio;Music;Player;AudioVideo;
+StartupWMClass=app.noirplayer.desktop

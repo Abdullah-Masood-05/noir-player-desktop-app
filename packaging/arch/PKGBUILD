@@ -1,0 +1,16 @@
+# Maintainer: Abdullah Masood <Abdullah-Masood-05@users.noreply.github.com>
+pkgname=noir-player
+pkgver=${VERSION:-0.0.0}
+pkgrel=1
+pkgdesc="Noir Player music player"
+arch=('x86_64')
+url="https://github.com/Abdullah-Masood-05/noir-player-desktop-app"
+license=('MIT')
+depends=('alsa-lib' 'libxkbcommon' 'libxkbcommon-x11' 'vulkan-icd-loader' 'wayland')
+options=('!strip')
+package() {
+  install -Dm755 noir_player "$pkgdir/usr/bin/noir_player"
+  install -Dm644 app.noirplayer.desktop "$pkgdir/usr/share/applications/app.noirplayer.desktop"
+  install -Dm644 app.noirplayer.desktop.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/app.noirplayer.desktop.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/noir-player/LICENSE"
+}

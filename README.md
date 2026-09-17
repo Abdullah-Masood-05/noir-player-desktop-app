@@ -127,7 +127,7 @@ Build and packaging decisions are based on:
 | --- | --- | --- |
 | `x86_64-pc-windows-msvc` | `windows-2022` | `noir-player-1.1.3-windows-x64.zip`, containing `noir_player.exe` |
 | `aarch64-apple-darwin` | `macos-14` | `noir-player-1.1.3-macos-arm64.tar.gz`, containing `Noir Player.app` |
-| `x86_64-unknown-linux-gnu` | `ubuntu-24.04` | `noir-player-1.1.3-linux-x64.deb` |
+| `x86_64-unknown-linux-gnu` | `ubuntu-24.04` | `noir-player-1.1.3-linux-x64.deb`, `.rpm` and `.pkg.tar.zst` |
 
 These are configured targets, not claims of successful builds or runtime tests. Linux and macOS remain unverified until their runners pass and the resulting packages receive manual smoke tests. Windows packages also need release-candidate testing. No installer signing, Apple notarization or automatic updates are configured. OS security warnings are expected for unsigned downloads.
 

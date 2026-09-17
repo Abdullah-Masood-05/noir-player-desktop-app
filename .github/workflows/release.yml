@@ -247,58 +247,61 @@ jobs:
           manifest = tomllib.loads(pathlib.Path('Cargo.toml').read_text())
           app_id = manifest['package']['metadata']['bundle']['identifier']
           version = os.environ['VERSION']
+          workspace = pathlib.Path.cwd()
           home = pathlib.Path(os.environ['RUNNER_TEMP']) / 'rpmbuild'
           top = home / 'rpmbuild'
           for sub in ('BUILD', 'RPMS', 'SOURCES', 'SPECS', 'SRPMS'):
               (top / sub).mkdir(parents=True)
-          spec = f'''%define _binary_payload w.ufdio
-          Name:           noir-player
-          Version:        {version}
-          Release:        1%{{?dist}}
-          Summary:        Noir Player music player
-          License:        MIT
-          URL:            https://github.com/Abdullah-Masood-05/noir-player-desktop-app
-          AutoReqProv:    no
-          Requires:       alsa-lib, libxkbcommon, libxkbcommon-x11, vulkan-loader, wayland
-          %description
-          Noir Player music player.
-          %prep
-          %build
-          %install
-          mkdir -p %{{buildroot}}/usr/bin
-          install -m 755 target/{os.environ['TARGET']}/release/noir_player %{{buildroot}}/usr/bin/noir_player
-          mkdir -p %{{buildroot}}/usr/share/applications
-          cat > %{{buildroot}}/usr/share/applications/{app_id}.desktop <<'DESK'
-          [Desktop Entry]
-          Type=Application
-          Name=Noir Player
-          Comment=Noir Player music player
-          Exec=noir_player
-          Icon={app_id}
-          Terminal=false
-          Categories=Audio;Music;Player;AudioVideo;
-          StartupWMClass={app_id}
-          DESK
-          mkdir -p %{{buildroot}}/usr/share/icons/hicolor/256x256/apps
-          cp Noir_Player_Logo.png %{{buildroot}}/usr/share/icons/hicolor/256x256/apps/{app_id}.png
-          mkdir -p %{{buildroot}}/usr/share/licenses/noir-player
-          install -m 644 LICENSE %{{buildroot}}/usr/share/licenses/noir-player/LICENSE
-          %files
-          /usr/bin/noir_player
-          /usr/share/applications/{app_id}.desktop
-          /usr/share/icons/hicolor/256x256/apps/{app_id}.png
-          /usr/share/licenses/noir-player/LICENSE
-          %changelog
-          * Thu Sep 17 2026 Abdullah Masood <Abdullah-Masood-05@users.noreply.github.com> - {version}-1
-          - First RPM package of Noir Player.
-          '''
-          (top / 'SPECS/noir-player.spec').write_text('\n'.join(line[10:] for line in spec.splitlines()))
-          subprocess.run(['rpmbuild', '-bb', '--define', f'_topdir {top}', '--define', '%__strip /bin/true', str(top / 'SPECS/noir-player.spec')], check=True)
+          spec = '\n'.join([
+              '%define _binary_payload w9.gzdio',
+              'Name:           noir-player',
+              f'Version:        {version}',
+              'Release:        1%{?dist}',
+              'Summary:        Noir Player music player',
+              'License:        MIT',
+              'URL:            https://github.com/Abdullah-Masood-05/noir-player-desktop-app',
+              'AutoReqProv:    no',
+              'Requires:       alsa-lib, libxkbcommon, libxkbcommon-x11, vulkan-loader, wayland',
+              '%description',
+              'Noir Player music player.',
+              '%prep',
+              '%build',
+              '%install',
+              'mkdir -p %{buildroot}/usr/bin',
+              f"install -m 755 {workspace / 'target' / os.environ['TARGET'] / 'release/noir_player'} %{{buildroot}}/usr/bin/noir_player",
+              'mkdir -p %{buildroot}/usr/share/applications',
+              f"cat > %{{buildroot}}/usr/share/applications/{app_id}.desktop <<'DESK'",
+              '[Desktop Entry]',
+              'Type=Application',
+              'Name=Noir Player',
+              'Comment=Noir Player music player',
+              'Exec=noir_player',
+              f'Icon={app_id}',
+              'Terminal=false',
+              'Categories=Audio;Music;Player;AudioVideo;',
+              f'StartupWMClass={app_id}',
+              'DESK',
+              'mkdir -p %{buildroot}/usr/share/icons/hicolor/256x256/apps',
+              f"cp {workspace / 'Noir_Player_Logo.png'} %{{buildroot}}/usr/share/icons/hicolor/256x256/apps/{app_id}.png",
+              'mkdir -p %{buildroot}/usr/share/licenses/noir-player',
+              f'install -m 644 {workspace / "LICENSE"} %{{buildroot}}/usr/share/licenses/noir-player/LICENSE',
+              '%files',
+              '/usr/bin/noir_player',
+              f'/usr/share/applications/{app_id}.desktop',
+              f'/usr/share/icons/hicolor/256x256/apps/{app_id}.png',
+              '/usr/share/licenses/noir-player/LICENSE',
+              '%changelog',
+              f'* Thu Sep 17 2026 Abdullah Masood <Abdullah-Masood-05@users.noreply.github.com> - {version}-1',
+              '- First RPM package of Noir Player.',
+          ])
+          (top / 'SPECS/noir-player.spec').write_text(spec)
+          subprocess.run(['rpmbuild', '-bb', '--define', f'_topdir {top}', '--define', f'__strip /bin/true', str(top / 'SPECS/noir-player.spec')], cwd=workspace, check=True)
           rpm = next((top / 'RPMS/x86_64').glob('noir-player-*.rpm'))
-          rpm = rpm.replace(rpm.name, f"noir-player-{version}-linux-x64.rpm")
-          subprocess.run(['rpm', '-qp', '--info', str(rpm)], check=True)
+          renamed = rpm.with_name(f"noir-player-{version}-linux-x64.rpm")
+          rpm.rename(renamed)
+          subprocess.run(['rpm', '-qp', '--info', str(renamed)], check=True)
           pathlib.Path('dist').mkdir(exist_ok=True)
-          rpm.replace(pathlib.Path('dist') / rpm.name)
+          renamed.rename(pathlib.Path('dist') / renamed.name)
           PY
       - name: Build Arch Linux package (.pkg.tar.zst)
         if: runner.os == 'Linux'
@@ -306,13 +309,16 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -w /workspace \
+            -e TARGET \
+            -e VERSION \
             archlinux:base-devel \
             bash -c "
+              set -e
               pacman -Syu --noconfirm --needed git fakeroot
               useradd -m builduser
               echo 'builduser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
               mkdir -p /tmp/archpkg/src
-              cp /workspace/target/\$TARGET/release/noir_player /tmp/archpkg/src/noir_player
+              cp /workspace/target/${TARGET}/release/noir_player /tmp/archpkg/src/noir_player
               cp /workspace/packaging/arch/app.noirplayer.desktop /tmp/archpkg/src/
               cp /workspace/Noir_Player_Logo.png /tmp/archpkg/src/app.noirplayer.desktop.png
               cp /workspace/LICENSE /tmp/archpkg/src/LICENSE
@@ -323,7 +329,7 @@ jobs:
               mkdir -p /workspace/dist
               cp /tmp/archpkg/noir-player-*.pkg.tar.zst /workspace/dist/
             "
-          python -c "import glob,os; f=glob.glob('dist/*.pkg.tar.zst'); assert len(f)==1; os.replace(f[0], os.path.join('dist', f'noir-player-{os.environ["VERSION"]}-linux-x64.pkg.tar.zst'))"
+          python3 -c "import glob,os; f=glob.glob('dist/*.pkg.tar.zst'); assert len(f)==1; os.replace(f[0], os.path.join('dist', f'noir-player-' + os.environ['VERSION'] + '-linux-x64.pkg.tar.zst'))"
       - name: Check lockfile and write SHA256 sidecar
         run: |
           git diff --exit-code -- Cargo.lock Cargo.toml

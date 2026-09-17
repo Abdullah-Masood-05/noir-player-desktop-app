@@ -1,6 +1,6 @@
 # Maintainer: Abdullah Masood <Abdullah-Masood-05@users.noreply.github.com>
 pkgname=noir-player
-pkgver=${VERSION:-0.0.0}
+pkgver=${VERSION:-1.1.3}
 pkgrel=1
 pkgdesc="Noir Player music player"
 arch=('x86_64')

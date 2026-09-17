@@ -193,7 +193,7 @@ jobs:
               str(dmg),
           ], check=True)
           assert dmg.exists() and dmg.stat().st_size > 0
-          info = subprocess.check_output(['hdiutil', 'info', '-plist', str(dmg)], text=True)
+          info = subprocess.check_output(['hdiutil', 'imageinfo', '-plist', str(dmg)], text=True)
           assert 'UDZO' in info
           print(dmg)
           PY

@@ -50,7 +50,7 @@ jobs:
             "$DMG_NAME"
 
           echo "Verifying DMG format..."
-          hdiutil info -plist "$DMG_NAME" | grep -q 'UDZO'
+          hdiutil imageinfo "$DMG_NAME" | grep -q 'Format: UDZO' || hdiutil imageinfo "$DMG_NAME" | grep -q 'UDZO'
 
           echo "Generating SHA256 checksum..."
           shasum -a 256 "$DMG_NAME" > "${DMG_NAME}.sha256"

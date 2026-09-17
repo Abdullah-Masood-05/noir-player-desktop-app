@@ -104,7 +104,7 @@ jobs:
         if: runner.os == 'Windows' && !inputs.skip_windows_installers
         uses: actions/cache@v4
         with:
-          path: target/installer-tools/.tauri
+          path: ${{ env.LOCALAPPDATA }}/tauri
           key: windows-installer-tools-${{ runner.os }}-${{ runner.arch }}-bundler-2.9.4-utils-2.9.3
       - name: Build Windows release application
         if: runner.os == 'Windows' && !inputs.skip_windows_installers

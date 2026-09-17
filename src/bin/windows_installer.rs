@@ -116,7 +116,11 @@ mod windows {
             .current_dir(root)
             .output()
             .context("Cannot read Cargo package metadata")?;
-        ensure!(output.status.success(), "Cargo metadata failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+        ensure!(
+            output.status.success(),
+            "Cargo metadata failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
         let metadata: serde_json::Value = serde_json::from_slice(&output.stdout)
             .context("Cargo metadata returned invalid JSON")?;
         let package = metadata["packages"]

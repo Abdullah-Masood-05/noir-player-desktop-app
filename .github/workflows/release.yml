@@ -52,6 +52,8 @@ jobs:
   checks:
     needs: validate
     uses: ./.github/workflows/ci.yml
+    with:
+      skip_windows_installers: true
     permissions:
       contents: read
   package:
@@ -121,26 +123,34 @@ jobs:
         run: |
           cargo install cargo-bundle --version 0.11.0 --locked
           cargo fetch --locked
-      - name: Package Windows executable
+      - name: Cache Windows installer tools
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: target/installer-tools/.tauri
+          key: windows-installer-tools-${{ runner.os }}-${{ runner.arch }}-bundler-2.9.4-utils-2.9.3
+      - name: Generate and validate Windows installers
         if: runner.os == 'Windows'
         run: |
+          cargo installer --release-dir "target/$TARGET/release"
           python - <<'PY'
           import os
           import pathlib
-          import struct
-          import zipfile
-          binary = pathlib.Path('target') / os.environ['TARGET'] / 'release/noir_player.exe'
-          data = binary.read_bytes()
-          offset = struct.unpack_from('<I', data, 0x3c)[0]
-          assert data[offset:offset + 4] == b'PE\0\0'
-          assert struct.unpack_from('<H', data, offset + 4)[0] == 0x8664, 'Expected x64 PE'
-          pathlib.Path('dist').mkdir(exist_ok=True)
-          name = f"noir-player-{os.environ['VERSION']}-windows-x64.zip"
-          with zipfile.ZipFile(pathlib.Path('dist') / name, 'w', zipfile.ZIP_DEFLATED) as archive:
-              archive.write(binary, 'noir_player.exe')
-          with zipfile.ZipFile(pathlib.Path('dist') / name) as archive:
-              assert archive.namelist() == ['noir_player.exe']
-              assert archive.testzip() is None
+          import shutil
+          release = pathlib.Path('target') / os.environ['TARGET'] / 'release'
+          outputs = []
+          for kind, pattern, suffix in (('msi', '*.msi', 'windows-x64.msi'), ('nsis', '*.exe', 'windows-x64-setup.exe')):
+              installers = list((release / 'bundle' / kind).glob(pattern))
+              assert len(installers) == 1, f'Expected exactly one {kind} installer: {installers}'
+              installer = installers[0]
+              assert installer.is_file() and installer.stat().st_size > 0, f'Empty or invalid {kind} installer'
+              outputs.append((installer, f"noir-player-{os.environ['VERSION']}-{suffix}"))
+          dist = pathlib.Path('dist')
+          dist.mkdir(exist_ok=True)
+          for installer, name in outputs:
+              destination = dist / name
+              shutil.copyfile(installer, destination)
+              assert destination.stat().st_size == installer.stat().st_size
           PY
       - name: Bundle macOS application
         if: runner.os == 'macOS'
@@ -148,7 +158,7 @@ jobs:
           CARGO_BUNDLE_SKIP_BUILD: 'true'
           CARGO_NET_OFFLINE: 'true'
         run: |
-          cargo bundle --release --target "$TARGET" --format osx
+          cargo bundle --release --bin noir_player --target "$TARGET" --format osx
           python - <<'PY'
           import os
           import pathlib
@@ -179,7 +189,7 @@ jobs:
           CARGO_BUNDLE_SKIP_BUILD: 'true'
           CARGO_NET_OFFLINE: 'true'
         run: |
-          cargo bundle --release --target "$TARGET" --format deb
+          cargo bundle --release --bin noir_player --target "$TARGET" --format deb
           python - <<'PY'
           import hashlib
           import os
@@ -378,7 +388,7 @@ jobs:
           import pathlib
           import re
           version = os.environ['VERSION']
-          expected = [f'noir-player-{version}-{suffix}' for suffix in ('windows-x64.zip', 'macos-arm64.tar.gz', 'linux-x64.deb', 'linux-x64.rpm', 'linux-x64.pkg.tar.zst')]
+          expected = [f'noir-player-{version}-{suffix}' for suffix in ('windows-x64.msi', 'windows-x64-setup.exe', 'macos-arm64.tar.gz', 'linux-x64.deb', 'linux-x64.rpm', 'linux-x64.pkg.tar.zst')]
           folder = pathlib.Path('dist')
           assert {path.name for path in folder.iterdir()} == set(expected + [name + '.sha256' for name in expected]), 'Incomplete or unexpected assets'
           sums = []
@@ -402,5 +412,5 @@ jobs:
             echo '::error::A release already exists. Review it manually; this workflow never replaces release assets.'
             exit 1
           fi
-          gh release create "$RELEASE_TAG" dist/*.zip dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/SHA256SUMS \
+          gh release create "$RELEASE_TAG" dist/*.msi dist/*-setup.exe dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.sha256 dist/SHA256SUMS \
             --verify-tag --draft --title "Noir Player $VERSION" --notes-file release-notes.txt

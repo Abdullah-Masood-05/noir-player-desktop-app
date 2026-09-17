@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      skip_windows_installers:
+        description: Skip installer generation when the caller packages the same revision
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -85,3 +90,49 @@ jobs:
         run: cargo test --locked --all-targets --target "${{ matrix.target }}"
       - name: Clippy
         run: cargo clippy --locked --all-targets --target "${{ matrix.target }}" -- -D warnings
+      - name: Typecheck Windows installer feature
+        if: runner.os == 'Windows'
+        run: cargo check --locked --features installer --bin windows_installer --target "${{ matrix.target }}"
+      - name: Clippy Windows installer feature
+        if: runner.os == 'Windows'
+        run: cargo clippy --locked --features installer --bin windows_installer --target "${{ matrix.target }}" -- -D warnings
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Windows' && !inputs.skip_windows_installers
+        with:
+          python-version: '3.12'
+      - name: Cache Windows installer tools
+        if: runner.os == 'Windows' && !inputs.skip_windows_installers
+        uses: actions/cache@v4
+        with:
+          path: target/installer-tools/.tauri
+          key: windows-installer-tools-${{ runner.os }}-${{ runner.arch }}-bundler-2.9.4-utils-2.9.3
+      - name: Build Windows release application
+        if: runner.os == 'Windows' && !inputs.skip_windows_installers
+        run: cargo build --release --locked --bin noir_player --target "${{ matrix.target }}"
+      - name: Generate and validate Windows installers
+        if: runner.os == 'Windows' && !inputs.skip_windows_installers
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cargo installer --release-dir "target/$TARGET/release"
+          python - <<'PY'
+          import os
+          import pathlib
+          release = pathlib.Path('target') / os.environ['TARGET'] / 'release'
+          for kind, pattern in (('msi', '*.msi'), ('nsis', '*.exe')):
+              installers = list((release / 'bundle' / kind).glob(pattern))
+              assert len(installers) == 1, f'Expected exactly one {kind} installer: {installers}'
+              assert installers[0].is_file() and installers[0].stat().st_size > 0, f'Empty or invalid {kind} installer'
+          PY
+          git diff --exit-code -- Cargo.lock Cargo.toml
+      - name: Upload Windows test installers
+        if: runner.os == 'Windows' && !inputs.skip_windows_installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-windows-x64-installers
+          path: |
+            target/${{ matrix.target }}/release/bundle/msi/*.msi
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -123,21 +123,51 @@ Build and packaging decisions are based on:
 
 ## Packaging and releases
 
+The current workflow produces the following assets, where `VERSION` is the version in `Cargo.toml`. Windows installers are an Unreleased change; this does not change the historical 1.1.3 ZIP release notes.
+
 | Target | Runner | Artifact |
 | --- | --- | --- |
-| `x86_64-pc-windows-msvc` | `windows-2022` | `noir-player-1.1.3-windows-x64.zip`, containing `noir_player.exe` |
-| `aarch64-apple-darwin` | `macos-14` | `noir-player-1.1.3-macos-arm64.tar.gz`, containing `Noir Player.app` |
-| `x86_64-unknown-linux-gnu` | `ubuntu-24.04` | `noir-player-1.1.3-linux-x64.deb`, `.rpm` and `.pkg.tar.zst` |
+| `x86_64-pc-windows-msvc` | `windows-2022` | `noir-player-VERSION-windows-x64.msi` and `noir-player-VERSION-windows-x64-setup.exe` |
+| `aarch64-apple-darwin` | `macos-14` | `noir-player-VERSION-macos-arm64.tar.gz`, containing `Noir Player.app` |
+| `x86_64-unknown-linux-gnu` | `ubuntu-24.04` | `noir-player-VERSION-linux-x64.deb`, `.rpm` and `.pkg.tar.zst` |
 
 These are configured targets, not claims of successful builds or runtime tests. Linux and macOS remain unverified until their runners pass and the resulting packages receive manual smoke tests. Windows packages also need release-candidate testing. No installer signing, Apple notarization or automatic updates are configured. OS security warnings are expected for unsigned downloads.
 
-CI checks formatting, typechecking, build, tests and Clippy on all three platforms. Release runs on `v*` tags and manual dispatch. Dispatch must select an existing tag matching the version in `Cargo.toml`, for example `v1.1.3`. Manual dispatch builds artifacts by default; enable `create_draft` to request a draft release.
+CI checks formatting, typechecking, build, tests and Clippy on all three platforms. Windows also checks the `installer` feature and runs Clippy with `-D warnings`, builds the release application, generates both installers, validates exactly one nonempty MSI and NSIS EXE, and uploads `ci-windows-x64-installers` for 14 days. Branch pushes, pull requests and manual CI dispatch exercise generation without a release tag; they do not install or launch the application.
 
-The release workflow calls the separate CI workflow at the same revision before packaging. Every platform must pass. Artifacts and SHA256 sidecars are uploaded first and retained for 14 days. The draft job requires the complete expected artifact set, verifies each checksum, combines them into `SHA256SUMS`, and extracts only that version's section from `CHANGELOG.md`.
+Release runs on `v*` tags and manual dispatch. Dispatch must select an existing tag matching the version in `Cargo.toml`. Manual dispatch builds artifacts by default; enable `create_draft` to request a draft release. Before the next release, bump the version and move the relevant Unreleased notes into its version-scoped section; do not rewrite or retag 1.1.3.
+
+The release workflow calls the separate CI workflow at the same revision before packaging. Every platform must pass. The release caller skips CI's extra Windows release build and installer generation because its packaging job performs them, but retains installer feature checks. Windows packaging reuses the built application and normalizes the MSI and NSIS filenames listed above. Artifacts and SHA256 sidecars are uploaded first and retained for 14 days. The draft job requires all six package assets and their sidecars, verifies each checksum, combines them into `SHA256SUMS`, and extracts only that version's section from `CHANGELOG.md`. Draft release uploads include the packages, sidecars and `SHA256SUMS`.
 
 Configure the GitHub environment `release-draft` with required reviewers and tag deployment restrictions before enabling release creation. Merely naming an environment does not configure approval rules. Build jobs have read-only repository access; only the draft job has `contents: write`. It uses `gh release create --draft --verify-tag`, refuses to replace an existing release and never publishes a live release automatically. Inspect assets, run installation and playback smoke tests, and review notes before manually publishing the draft.
 
 ### Local package commands
+
+On Windows x64, run from the repository root:
+
+```sh
+cargo build --release
+cargo installer
+```
+
+The default input is `target/release/noir_player.exe`. The `.cargo/config.toml` alias expands to `cargo run --release --locked --features installer --bin windows_installer --`; the optional installer binary is skipped by default builds. It packages the existing application executable without rebuilding or installing the application locally. Its packaging-only dependencies are pinned to `tauri-bundler 2.9.4` and `tauri-utils 2.9.3`; no Tauri or WebView runtime is added to Noir Player.
+
+```text
+target/release/
+  noir_player.exe
+  bundle/
+    msi/*.msi
+    nsis/*.exe
+```
+
+To package an explicitly targeted build instead:
+
+```sh
+cargo build --release --locked --target x86_64-pc-windows-msvc
+cargo installer --release-dir "target/x86_64-pc-windows-msvc/release"
+```
+
+Both installers are written below `<release-dir>/bundle/msi/*.msi` and `<release-dir>/bundle/nsis/*.exe`. Generation requires a Windows host and an x64 PE application executable. WiX and NSIS are downloaded automatically and cached in `target/installer-tools/.tauri`; allow HTTPS access for the initial download. No system WiX or NSIS installation is needed. MSI generation requires Windows PowerShell, .NET Framework 4.5 or later, and VBScript enabled in Windows Optional Features. These are packaging prerequisites, not a requirement to install Noir Player on the build machine. Installers are unsigned; SmartScreen or other Windows security warnings are expected. Generation is not an installation or uninstall smoke test.
 
 On macOS or Linux, install the pinned packaging tool:
 
@@ -150,16 +180,16 @@ Version 0.11.0 is a released, non-yanked crates.io version. Its API metadata dec
 ```sh
 cargo build --release --locked --target aarch64-apple-darwin
 cargo fetch --locked
-CARGO_BUNDLE_SKIP_BUILD=true CARGO_NET_OFFLINE=true cargo bundle --release --target aarch64-apple-darwin --format osx
+CARGO_BUNDLE_SKIP_BUILD=true CARGO_NET_OFFLINE=true cargo bundle --release --bin noir_player --target aarch64-apple-darwin --format osx
 ```
 
 ```sh
 cargo build --release --locked --target x86_64-unknown-linux-gnu
 cargo fetch --locked
-CARGO_BUNDLE_SKIP_BUILD=true CARGO_NET_OFFLINE=true cargo bundle --release --target x86_64-unknown-linux-gnu --format deb
+CARGO_BUNDLE_SKIP_BUILD=true CARGO_NET_OFFLINE=true cargo bundle --release --bin noir_player --target x86_64-unknown-linux-gnu --format deb
 ```
 
-These commands run on their respective native platforms and produce bundles below `target/<triple>/release/bundle`. For the distributable package, use the release workflow's postprocessing too. It sets the macOS minimum version, checks arm64 architecture and the bundle icon, and archives the `.app` with Unix permissions preserved. Windows packaging archives only the built x64 executable.
+These commands run on their respective native platforms and produce bundles below `target/<triple>/release/bundle`. Explicit `--bin noir_player` selects the application rather than the optional installer binary. For the distributable package, use the release workflow's postprocessing too. It sets the macOS minimum version, checks arm64 architecture and the bundle icon, and archives the `.app` with Unix permissions preserved. Windows uses `cargo installer` instead of cargo-bundle and validates both installer outputs before copying them to normalized release asset names.
 
 For Linux packaging, additionally install `dpkg-dev`, `fakeroot` and `desktop-file-utils`. cargo-bundle 0.11.0 names the desktop entry and icons after the binary, not `identifier`. The workflow renames them to `app.noirplayer.desktop.desktop` and `app.noirplayer.desktop.png`, updates `Icon`, adds `StartupWMClass`, and verifies the identifier against GPUI's `app_id`. The repeated `.desktop` is intentional: the application ID itself ends in `.desktop`.
 

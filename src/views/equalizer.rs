@@ -31,13 +31,16 @@ pub fn render_equalizer_modal(
             this.close_equalizer(cx);
         }))
         .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-            if event.keystroke.key == "escape" || event.keystroke.key == "Escape" {
+            let k = event.keystroke.key.trim();
+            if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                cx.stop_propagation();
                 this.close_equalizer(cx);
             }
         }))
         .child(
             v_flex()
                 .id("equalizer-modal")
+                .track_focus(&model.equalizer_focus_handle)
                 .w(px(660.0))
                 .rounded_2xl()
                 .bg(c(0x111215))
@@ -46,8 +49,16 @@ pub fn render_equalizer_modal(
                 .shadow(vec![BoxShadow::new(px(0.0), px(24.0), c(0x000000))
                     .blur_radius(px(48.0))])
                 .overflow_hidden()
-                .on_click(cx.listener(|_, _, _, cx| {
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    let k = event.keystroke.key.trim();
+                    if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                        cx.stop_propagation();
+                        this.close_equalizer(cx);
+                    }
+                }))
+                .on_click(cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
+                    window.focus(&this.equalizer_focus_handle, cx);
                 }))
                 .child(modal_header(model, cx))
                 .child(master_toggle_section(eq_enabled, cx))

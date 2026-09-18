@@ -60,13 +60,16 @@ pub fn render_settings_modal(
             this.close_settings(cx);
         }))
         .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-            if event.keystroke.key == "escape" || event.keystroke.key == "Escape" {
+            let k = event.keystroke.key.trim();
+            if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                cx.stop_propagation();
                 this.close_settings(cx);
             }
         }))
         .child(
             v_flex()
                 .id("settings-modal")
+                .track_focus(&model.settings_focus_handle)
                 .w(px(720.0))
                 .h(px(560.0))
                 .rounded_xl()
@@ -76,8 +79,16 @@ pub fn render_settings_modal(
                 .shadow(vec![BoxShadow::new(px(0.0), px(24.0), c(0x000000))
                     .blur_radius(px(48.0))])
                 .overflow_hidden()
-                .on_click(cx.listener(|_, _, _, cx| {
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    let k = event.keystroke.key.trim();
+                    if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                        cx.stop_propagation();
+                        this.close_settings(cx);
+                    }
+                }))
+                .on_click(cx.listener(|this, _, window, cx| {
                     cx.stop_propagation();
+                    window.focus(&this.settings_focus_handle, cx);
                 }))
                 .child(modal_header(model, cx))
                 .child(category_chips(model, cx))
@@ -113,7 +124,18 @@ fn modal_header(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> D
                 .flex_shrink_0()
                 .child(icon_text(MusicIcon::Search, 16.0)),
         )
-        .child(div().flex_1().child(Input::new(&model.settings_search)))
+        .child(
+            div()
+                .flex_1()
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    let k = event.keystroke.key.trim();
+                    if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                        cx.stop_propagation();
+                        this.close_settings(cx);
+                    }
+                }))
+                .child(Input::new(&model.settings_search)),
+        )
         .child(
             div()
                 .id("settings-close-x")

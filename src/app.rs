@@ -98,6 +98,8 @@ pub struct NoirPlayerModel {
     discover_downloads: Vec<Track>,
     pub settings_open: bool,
     pub equalizer_open: bool,
+    pub settings_focus_handle: FocusHandle,
+    pub equalizer_focus_handle: FocusHandle,
     pub settings_category: crate::views::settings::SettingsCategory,
     pub settings_search: Entity<InputState>,
     pub settings_selected_index: usize,
@@ -183,6 +185,8 @@ impl NoirPlayerModel {
             discover_downloads: Vec::new(),
             settings_open: false,
             equalizer_open: false,
+            settings_focus_handle: cx.focus_handle(),
+            equalizer_focus_handle: cx.focus_handle(),
             settings_category: crate::views::settings::SettingsCategory::All,
             settings_search,
             settings_selected_index: 0,
@@ -962,6 +966,22 @@ impl Render for NoirPlayerModel {
         let active_tab = self.active_tab;
         let has_track = self.now_playing().is_some();
         let dialog_layer = Root::render_dialog_layer(window, cx);
+
+        if self.equalizer_open {
+            if !self.equalizer_focus_handle.is_focused(window) {
+                window.focus(&self.equalizer_focus_handle, cx);
+            }
+        } else if self.settings_open {
+            let search_focused = self
+                .settings_search
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
+            if !search_focused && !self.settings_focus_handle.is_focused(window) {
+                window.focus(&self.settings_focus_handle, cx);
+            }
+        }
+
         v_flex()
             .id("app-root")
             .size_full()
@@ -972,7 +992,9 @@ impl Render for NoirPlayerModel {
             .text_color(cx.theme().foreground)
             .when(self.settings_open || self.equalizer_open, |d| {
                 d.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    if event.keystroke.key == "escape" || event.keystroke.key == "Escape" {
+                    let k = event.keystroke.key.trim();
+                    if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                        cx.stop_propagation();
                         if this.equalizer_open {
                             this.close_equalizer(cx);
                         }

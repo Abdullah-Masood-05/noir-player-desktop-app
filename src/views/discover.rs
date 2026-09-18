@@ -6,13 +6,21 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
-use crate::views::library::{app_bar, top_fade};
-use crate::views::ui::{icon_text, red, red_a, surface, white};
+use crate::views::library::app_bar;
+use crate::views::ui::{
+    dynamic_border, dynamic_subtitle, dynamic_surface, dynamic_text, icon_text, red, red_a,
+    top_fade,
+};
 
 pub fn render_discover(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let query = model.discover_search.read(cx).value();
     let content = if model.discover_loading {
-        div().p_4().child("Searching Last.fm...").into_any_element()
+        div()
+            .p_4()
+            .text_color(dynamic_subtitle(is_light))
+            .child("Searching Last.fm...")
+            .into_any_element()
     } else if let Some(error) = &model.discover_error {
         div()
             .p_4()
@@ -22,6 +30,7 @@ pub fn render_discover(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerM
     } else if model.discover_tracks.is_empty() {
         div()
             .p_4()
+            .text_color(dynamic_subtitle(is_light))
             .child("No tracks found. Try another title or artist.")
             .into_any_element()
     } else {
@@ -35,7 +44,8 @@ pub fn render_discover(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerM
                     .gap_3()
                     .p_3()
                     .rounded_xl()
-                    .bg(surface())
+                    .bg(dynamic_surface(is_light))
+                    .when(is_light, |d| d.border_1().border_color(dynamic_border(is_light)))
                     .items_center()
                     .child(
                         div()
@@ -56,13 +66,14 @@ pub fn render_discover(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerM
                                 div()
                                     .text_sm()
                                     .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(dynamic_text(is_light))
                                     .text_ellipsis()
                                     .child(track.name.clone()),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(white(0.55))
+                                    .text_color(dynamic_subtitle(is_light))
                                     .text_ellipsis()
                                     .child(track.artist.clone()),
                             ),
@@ -97,32 +108,93 @@ pub fn render_discover(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerM
             }))
             .into_any_element()
     };
-    v_flex().size_full().relative().child(top_fade()).child(
-        v_flex().size_full().relative()
-            .child(app_bar("Discover"))
-            .child(h_flex().p_3().gap_2().items_center().flex_shrink_0()
-                .child(div().flex_1().child(Input::new(&model.discover_search).cleanable(true)))
-                .child(Button::new("discover-search").label("Search").on_click(cx.listener(|this, _, _, cx| {
-                    this.load_discover(this.discover_search.read(cx).value().to_string(), cx);
-                })))
-                .child(Button::new("discover-trending").label("Trending").on_click(cx.listener(|this, _, window, cx| {
-                    this.discover_search.update(cx, |input, cx| input.set_value("", window, cx));
-                    this.load_discover(String::new(), cx);
-                }))))
-            .child(div().px_4().text_sm().text_color(red()).child(if query.trim().is_empty() { "Trending tracks" } else { "Search results" }))
-            .child(div().px_4().py_2().text_xs().text_color(white(0.55))
-                .child("Play prepares a cached download before local playback; it is not streaming. Download saves tagged audio to your Music folder."))
-            .children(model.discover_audio_status.clone().map(|status| {
-                h_flex().px_4().py_2().gap_2().items_center()
-                    .child(div().flex_1().min_w_0().text_sm().child(status))
-                    .when(model.discover_audio_busy(), |row| row.child(
-                        Button::new("discover-cancel-audio").label("Cancel")
-                            .on_click(cx.listener(|this, _, _, cx| this.cancel_discover_audio(cx))),
-                    ))
-            }))
-            .children(model.discover_audio_error.clone().map(|error| {
-                div().px_4().py_2().text_sm().text_color(red()).child(error)
-            }))
-            .child(crate::views::ui::smooth_scroll("discover-results", div().p_3().child(content)))
-    )
+    v_flex()
+        .size_full()
+        .relative()
+        .child(top_fade(is_light))
+        .child(
+            v_flex()
+                .size_full()
+                .relative()
+                .child(app_bar("Discover", is_light))
+                .child(
+                    h_flex()
+                        .p_3()
+                        .gap_2()
+                        .items_center()
+                        .flex_shrink_0()
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(Input::new(&model.discover_search).cleanable(true)),
+                        )
+                        .child(Button::new("discover-search").label("Search").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.load_discover(
+                                    this.discover_search.read(cx).value().to_string(),
+                                    cx,
+                                );
+                            }),
+                        ))
+                        .child(
+                            Button::new("discover-trending")
+                                .label("Trending")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.discover_search
+                                        .update(cx, |input, cx| input.set_value("", window, cx));
+                                    this.load_discover(String::new(), cx);
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .px_4()
+                        .text_sm()
+                        .text_color(red())
+                        .child(if query.trim().is_empty() {
+                            "Trending tracks"
+                        } else {
+                            "Search results"
+                        }),
+                )
+                .child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .text_xs()
+                        .text_color(dynamic_subtitle(is_light))
+                        .child("Play prepares a cached download before local playback; it is not streaming. Download saves tagged audio to your Music folder."),
+                )
+                .children(model.discover_audio_status.clone().map(|status| {
+                    h_flex()
+                        .px_4()
+                        .py_2()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_sm()
+                                .text_color(dynamic_text(is_light))
+                                .child(status),
+                        )
+                        .when(model.discover_audio_busy(), |row| {
+                            row.child(
+                                Button::new("discover-cancel-audio")
+                                    .label("Cancel")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.cancel_discover_audio(cx)
+                                    })),
+                            )
+                        })
+                }))
+                .children(model.discover_audio_error.clone().map(|error| {
+                    div().px_4().py_2().text_sm().text_color(red()).child(error)
+                }))
+                .child(crate::views::ui::smooth_scroll(
+                    "discover-results",
+                    div().p_3().child(content),
+                )),
+        )
 }

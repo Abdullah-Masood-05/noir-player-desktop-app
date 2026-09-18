@@ -4,9 +4,13 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
-use crate::views::ui::{bg_color, icon_text, img_from_bytes, red, red_a, white};
+use crate::views::ui::{
+    dynamic_bg, dynamic_hover, dynamic_muted, dynamic_subtitle, dynamic_text, icon_text,
+    img_from_bytes, red, red_a, white,
+};
 
 pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let is_playing = model.is_playing;
     let progress = model.progress();
     let (elapsed, total) = model.times();
@@ -38,15 +42,15 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                 .h(px(300.0))
                 .bg(linear_gradient(
                     180.0,
-                    linear_color_stop(red_a(0.28), 0.0),
-                    linear_color_stop(bg_color(), 1.0),
+                    linear_color_stop(red_a(if is_light { 0.20 } else { 0.28 }), 0.0),
+                    linear_color_stop(dynamic_bg(is_light).alpha(0.0), 1.0),
                 )),
         )
         .child(
             v_flex()
                 .size_full()
                 .relative()
-                .child(player_header(cx, eq_enabled))
+                .child(player_header(cx, eq_enabled, is_light))
                 .child(
                     v_flex()
                         .flex_1()
@@ -64,6 +68,7 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                     div()
                                         .text_xl()
                                         .font_weight(FontWeight::BOLD)
+                                        .text_color(dynamic_text(is_light))
                                         .text_center()
                                         .overflow_hidden()
                                         .text_ellipsis()
@@ -77,7 +82,12 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                         .child(artist),
                                 )
                                 .when(!album.is_empty(), |d| {
-                                    d.child(div().text_xs().text_color(white(0.5)).child(album))
+                                    d.child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(dynamic_subtitle(is_light))
+                                            .child(album),
+                                    )
                                 }),
                         ),
                 )
@@ -106,30 +116,42 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                         .w_full()
                                         .justify_between()
                                         .child(
-                                            div().text_xs().text_color(white(0.5)).child(elapsed),
+                                            div()
+                                                .text_xs()
+                                                .text_color(dynamic_muted(is_light))
+                                                .child(elapsed),
                                         )
-                                        .child(div().text_xs().text_color(white(0.5)).child(total)),
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(dynamic_muted(is_light))
+                                                .child(total),
+                                        ),
                                 ),
                         )
                         .child(
                             h_flex()
                                 .w_full()
                                 .items_center()
-                                .justify_between()
-                                .px(px(4.0))
+                                .justify_center()
+                                .gap(px(14.0))
                                 .child(
                                     div()
                                         .id("shuffle")
                                         .cursor_pointer()
-                                        .text_color(if shuffle { red() } else { white(0.5) })
+                                        .text_color(if shuffle {
+                                            red()
+                                        } else {
+                                            dynamic_subtitle(is_light)
+                                        })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.shuffle = !this.shuffle;
                                             cx.notify();
                                         }))
                                         .child(icon_text(MusicIcon::Shuffle, 20.0)),
                                 )
-                                .child(prev_btn(cx))
-                                .child(skip_back_btn(seek_interval, cx))
+                                .child(prev_btn(is_light, cx))
+                                .child(skip_back_btn(seek_interval, is_light, cx))
                                 .child(
                                     div()
                                         .id("play-pause")
@@ -158,13 +180,17 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                             34.0,
                                         )),
                                 )
-                                .child(skip_fwd_btn(seek_interval, cx))
-                                .child(next_btn(cx))
+                                .child(skip_fwd_btn(seek_interval, is_light, cx))
+                                .child(next_btn(is_light, cx))
                                 .child(
                                     div()
                                         .id("repeat")
                                         .cursor_pointer()
-                                        .text_color(if repeat_all { red() } else { white(0.5) })
+                                        .text_color(if repeat_all {
+                                            red()
+                                        } else {
+                                            dynamic_subtitle(is_light)
+                                        })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.repeat_all = !this.repeat_all;
                                             cx.notify();
@@ -176,7 +202,7 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
         )
 }
 
-fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
+fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool, is_light: bool) -> Div {
     h_flex()
         .w_full()
         .h(px(56.0))
@@ -196,7 +222,7 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
                 .text_center()
                 .text_lg()
                 .font_weight(FontWeight::BOLD)
-                .text_color(white(1.0))
+                .text_color(dynamic_text(is_light))
                 .child("Now Playing"),
         )
         .child(
@@ -211,9 +237,19 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_color(if eq_enabled { red() } else { white(0.7) })
+                        .text_color(if eq_enabled {
+                            red()
+                        } else {
+                            dynamic_subtitle(is_light)
+                        })
                         .cursor_pointer()
-                        .hover(|s| s.bg(white(0.08)).text_color(white(1.0)))
+                        .hover(move |s| {
+                            s.bg(dynamic_hover(is_light)).text_color(if eq_enabled {
+                                red()
+                            } else {
+                                dynamic_text(is_light)
+                            })
+                        })
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
                             this.toggle_equalizer(cx);
@@ -228,9 +264,11 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_color(white(0.7))
+                        .text_color(dynamic_subtitle(is_light))
                         .cursor_pointer()
-                        .hover(|s| s.bg(white(0.08)).text_color(white(1.0)))
+                        .hover(move |s| {
+                            s.bg(dynamic_hover(is_light)).text_color(dynamic_text(is_light))
+                        })
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
                             this.toggle_settings(cx);
@@ -240,7 +278,11 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
         )
 }
 
-fn skip_back_btn(interval: u32, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+fn skip_back_btn(
+    interval: u32,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Stateful<Div> {
     div()
         .id("skip-back")
         .size(px(40.0))
@@ -249,22 +291,26 @@ fn skip_back_btn(interval: u32, cx: &mut Context<NoirPlayerModel>) -> Stateful<D
         .flex_col()
         .items_center()
         .justify_center()
-        .text_color(white(0.85))
+        .text_color(dynamic_text(is_light))
         .cursor_pointer()
-        .hover(|s| s.bg(white(0.06)).text_color(white(1.0)))
+        .hover(move |s| s.bg(dynamic_hover(is_light)))
         .on_click(cx.listener(|this, _, _, cx| this.skip_backward(cx)))
         .child(icon_text(MusicIcon::RotateCcw, 18.0))
         .child(
             div()
                 .text_size(px(9.0))
                 .font_weight(FontWeight::BOLD)
-                .text_color(white(0.7))
+                .text_color(dynamic_subtitle(is_light))
                 .mt(px(-2.0))
                 .child(format!("{interval}s")),
         )
 }
 
-fn skip_fwd_btn(interval: u32, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+fn skip_fwd_btn(
+    interval: u32,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Stateful<Div> {
     div()
         .id("skip-forward")
         .size(px(40.0))
@@ -273,22 +319,22 @@ fn skip_fwd_btn(interval: u32, cx: &mut Context<NoirPlayerModel>) -> Stateful<Di
         .flex_col()
         .items_center()
         .justify_center()
-        .text_color(white(0.85))
+        .text_color(dynamic_text(is_light))
         .cursor_pointer()
-        .hover(|s| s.bg(white(0.06)).text_color(white(1.0)))
+        .hover(move |s| s.bg(dynamic_hover(is_light)))
         .on_click(cx.listener(|this, _, _, cx| this.skip_forward(cx)))
         .child(icon_text(MusicIcon::RotateCw, 18.0))
         .child(
             div()
                 .text_size(px(9.0))
                 .font_weight(FontWeight::BOLD)
-                .text_color(white(0.7))
+                .text_color(dynamic_subtitle(is_light))
                 .mt(px(-2.0))
                 .child(format!("{interval}s")),
         )
 }
 
-fn prev_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+fn prev_btn(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
     div()
         .id("prev")
         .size(px(40.0))
@@ -296,14 +342,14 @@ fn prev_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
         .flex()
         .items_center()
         .justify_center()
-        .text_color(white(0.85))
+        .text_color(dynamic_text(is_light))
         .cursor_pointer()
-        .hover(|s| s.bg(white(0.06)))
+        .hover(move |s| s.bg(dynamic_hover(is_light)))
         .on_click(cx.listener(|this, _, _, cx| this.prev(cx)))
         .child(icon_text(MusicIcon::SkipBack, 22.0))
 }
 
-fn next_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+fn next_btn(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
     div()
         .id("next")
         .size(px(40.0))
@@ -311,9 +357,9 @@ fn next_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
         .flex()
         .items_center()
         .justify_center()
-        .text_color(white(0.85))
+        .text_color(dynamic_text(is_light))
         .cursor_pointer()
-        .hover(|s| s.bg(white(0.06)))
+        .hover(move |s| s.bg(dynamic_hover(is_light)))
         .on_click(cx.listener(|this, _, _, cx| this.next(cx)))
         .child(icon_text(MusicIcon::SkipForward, 22.0))
 }

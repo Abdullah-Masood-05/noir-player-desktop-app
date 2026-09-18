@@ -8,25 +8,12 @@ use gpui_kit::*;
 use crate::app::{store, Collection, LibraryTab, NoirPlayerModel};
 use crate::media::Track;
 use crate::views::ui::{
-    bg_color, format_duration, icon_text, img_from_bytes, red, red_a, selected_highlight,
-    smooth_scroll, surface, tab_transition, white,
+    dynamic_hover, dynamic_muted, dynamic_subtitle, dynamic_text, format_duration, icon_text,
+    img_from_bytes, red, red_a, selected_highlight, smooth_scroll, tab_transition, top_fade,
+    white,
 };
 
-pub fn top_fade() -> Div {
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .h(px(160.0))
-        .bg(linear_gradient(
-            180.0,
-            linear_color_stop(red_a(0.20), 0.0),
-            linear_color_stop(bg_color(), 1.0),
-        ))
-}
-
-pub fn app_bar(title: &str) -> Div {
+pub fn app_bar(title: &str, is_light: bool) -> Div {
     h_flex()
         .w_full()
         .h(px(56.0))
@@ -41,7 +28,7 @@ pub fn app_bar(title: &str) -> Div {
                 .text_center()
                 .text_lg()
                 .font_weight(FontWeight::BOLD)
-                .text_color(white(1.0))
+                .text_color(dynamic_text(is_light))
                 .child(title.to_string()),
         )
         .child(div().w(px(30.0)))
@@ -54,6 +41,7 @@ pub fn song_row(
     playlist: Option<String>,
     cx: &mut Context<NoirPlayerModel>,
 ) -> AnyElement {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let Some(track) = model.tracks.get(index) else {
         return div().into_any_element();
     };
@@ -67,7 +55,7 @@ pub fn song_row(
         .px(px(10.0))
         .py(px(7.0))
         .rounded_lg()
-        .hover(|s| s.bg(surface()))
+        .hover(move |s| s.bg(dynamic_hover(is_light)))
         .when(is_current, |d| d.bg(red_a(0.10)))
         .child(
             h_flex()
@@ -92,7 +80,11 @@ pub fn song_row(
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .when(is_current, |d| d.text_color(red()))
+                                .text_color(if is_current {
+                                    red()
+                                } else {
+                                    dynamic_text(is_light)
+                                })
                                 .overflow_hidden()
                                 .text_ellipsis()
                                 .child(track.title.clone()),
@@ -100,7 +92,7 @@ pub fn song_row(
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(white(0.55))
+                                .text_color(dynamic_subtitle(is_light))
                                 .overflow_hidden()
                                 .text_ellipsis()
                                 .child(format!("{} · {}", track.artist, track.album)),
@@ -110,7 +102,7 @@ pub fn song_row(
                     div()
                         .flex_shrink_0()
                         .text_xs()
-                        .text_color(white(0.65))
+                        .text_color(dynamic_muted(is_light))
                         .child(format_duration(track.duration)),
                 ),
         )
@@ -121,8 +113,16 @@ pub fn song_row(
                 .p(px(6.0))
                 .rounded_md()
                 .cursor_pointer()
-                .bg(if favourite { red_a(0.18) } else { surface() })
-                .text_color(if favourite { red() } else { white(0.45) })
+                .bg(if favourite {
+                    red_a(0.18)
+                } else {
+                    dynamic_hover(is_light)
+                })
+                .text_color(if favourite {
+                    red()
+                } else {
+                    dynamic_muted(is_light)
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.toggle_favourite(index, cx);
@@ -171,7 +171,7 @@ pub fn artwork_thumb(track: &Track, size: f32) -> AnyElement {
     }
 }
 
-pub fn empty_state(msg: &str, sub: &str) -> Div {
+pub fn empty_state(msg: &str, sub: &str, is_light: bool) -> Div {
     v_flex()
         .flex_1()
         .min_h_0()
@@ -181,20 +181,24 @@ pub fn empty_state(msg: &str, sub: &str) -> Div {
         .p(px(16.0))
         .child(
             div()
-                .text_color(white(0.2))
+                .text_color(if is_light {
+                    hsla(0.0, 0.0, 0.1, 0.22)
+                } else {
+                    white(0.2)
+                })
                 .child(icon_text(MusicIcon::Music4, 64.0)),
         )
         .child(
             div()
                 .text_base()
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(white(0.8))
+                .text_color(dynamic_text(is_light))
                 .child(msg.to_string()),
         )
         .child(
             div()
                 .text_sm()
-                .text_color(white(0.45))
+                .text_color(dynamic_subtitle(is_light))
                 .child(sub.to_string()),
         )
 }
@@ -205,10 +209,12 @@ pub fn track_list(
     playlist: Option<String>,
     cx: &mut Context<NoirPlayerModel>,
 ) -> AnyElement {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     if indices.is_empty() {
         return empty_state(
             "No matching songs",
             "Search another title, artist or album, or add songs to this collection.",
+            is_light,
         )
         .into_any_element();
     }
@@ -227,6 +233,7 @@ pub fn track_list(
 }
 
 pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let tab = model.library_tab;
     let detail = model.library_detail.clone();
     let body = if let Some(collection) = detail.as_ref() {
@@ -259,6 +266,7 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                     empty_state(
                         "No matching collections",
                         "Album and artist information comes from file tags.",
+                        is_light,
                     )
                     .into_any_element()
                 } else {
@@ -306,6 +314,7 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                                             .text_sm()
                                             .text_center()
                                             .font_weight(FontWeight::MEDIUM)
+                                            .text_color(dynamic_text(is_light))
                                             .overflow_hidden()
                                             .text_ellipsis()
                                             .child(name.clone()),
@@ -313,7 +322,7 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                                     .child(
                                         div()
                                             .text_xs()
-                                            .text_color(white(0.5))
+                                            .text_color(dynamic_subtitle(is_light))
                                             .child(format!("{count} matching songs")),
                                     )
                             }),
@@ -328,7 +337,7 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
         .size_full()
         .min_h_0()
         .relative()
-        .child(top_fade())
+        .child(top_fade(is_light))
         .child(
             v_flex()
                 .flex_1()
@@ -337,8 +346,9 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                 .relative()
                 .child(app_bar(
                     detail.as_ref().map(Collection::name).unwrap_or("Library"),
+                    is_light,
                 ))
-                .when(detail.is_none(), |d| d.child(tab_bar(tab, cx)))
+                .when(detail.is_none(), |d| d.child(tab_bar(tab, is_light, cx)))
                 .when(detail.is_some(), |d| {
                     d.child(
                         h_flex().flex_shrink_0().px(px(12.0)).child(
@@ -362,7 +372,7 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(white(0.55))
+                                .text_color(dynamic_subtitle(is_light))
                                 .child(model.status.clone()),
                         )
                         .child(
@@ -383,13 +393,14 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
         )
 }
 
-pub fn tab_bar(active: LibraryTab, cx: &mut Context<NoirPlayerModel>) -> Div {
+pub fn tab_bar(active: LibraryTab, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
     let tabs = [
         (LibraryTab::Music, "Music"),
         (LibraryTab::Favourites, "Favourites"),
         (LibraryTab::Albums, "Albums"),
         (LibraryTab::Artists, "Artists"),
     ];
+    let unselected_color = dynamic_subtitle(is_light);
     h_flex()
         .w_full()
         .flex_shrink_0()
@@ -409,7 +420,7 @@ pub fn tab_bar(active: LibraryTab, cx: &mut Context<NoirPlayerModel>) -> Div {
                         .when(selected, |d| {
                             d.text_color(red()).font_weight(FontWeight::BOLD)
                         })
-                        .when(!selected, |d| d.text_color(white(0.55)))
+                        .when(!selected, |d| d.text_color(unselected_color))
                         .child(label),
                 )
                 .child(selected_highlight(

@@ -1,5 +1,5 @@
 use crate::app::{ActiveTab, NoirPlayerModel};
-use crate::views::ui::{icon_text, nav_bg, red, selected_highlight, white};
+use crate::views::ui::{icon_text, nav_bg, red, selected_highlight, white, LIGHT_MUTED, LIGHT_NAV_BG};
 use gpui_kit::assets::IconName as MusicIcon;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
@@ -15,7 +15,7 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
     ];
 
     let unselected_color = if is_light {
-        rgb(0x71717A).into()
+        rgb(LIGHT_MUTED).into()
     } else {
         white(0.5)
     };
@@ -27,7 +27,7 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
         .items_center()
         .justify_around()
         .bg(if is_light {
-            rgb(0xFFFFFF).into()
+            rgb(LIGHT_NAV_BG).into()
         } else {
             nav_bg()
         })

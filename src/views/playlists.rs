@@ -5,9 +5,12 @@ use gpui_kit::*;
 
 use crate::app::{Collection, NoirPlayerModel};
 use crate::views::library::{app_bar, empty_state, search_bar, song_row};
-use crate::views::ui::{icon_text, red_a, smooth_scroll, tab_transition, white};
+use crate::views::ui::{
+    dynamic_subtitle, dynamic_text, icon_text, red_a, smooth_scroll, tab_transition, top_fade,
+};
 
 pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let detail = model.playlist_detail.clone();
     let body = if let Some(name) = detail.as_ref() {
         let collection = Collection::Playlist(name.clone());
@@ -41,11 +44,16 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
                                 cx.notify();
                             })),
                     )
-                    .child(div().text_xs().text_color(white(0.55)).child(format!(
-                        "{total} saved songs · {} matching · {} unavailable",
-                        indices.len(),
-                        missing.len()
-                    ))),
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(dynamic_subtitle(is_light))
+                            .child(format!(
+                                "{total} saved songs · {} matching · {} unavailable",
+                                indices.len(),
+                                missing.len()
+                            )),
+                    ),
             )
             .child(search_bar(model))
             .child(smooth_scroll(
@@ -57,12 +65,14 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
                         empty_state(
                             "This playlist is empty",
                             "Use Add beside a library song to add it here.",
+                            is_light,
                         )
                     }))
                     .children((total > 0 && indices.is_empty()).then(|| {
                         div()
                             .p(px(12.0))
                             .text_sm()
+                            .text_color(dynamic_subtitle(is_light))
                             .child("No available songs match the search.")
                     }))
                     .children(indices.iter().map(|&index| {
@@ -79,7 +89,7 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
                                     .flex_1()
                                     .min_w_0()
                                     .text_sm()
-                                    .text_color(white(0.55))
+                                    .text_color(dynamic_subtitle(is_light))
                                     .child(format!("Unavailable: {}", path.display())),
                             )
                             .child(
@@ -96,6 +106,7 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
         empty_state(
             "No playlists yet",
             "Create a named playlist, then add songs from your library.",
+            is_light,
         )
         .into_any_element()
     } else {
@@ -132,12 +143,15 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(dynamic_text(is_light))
                                 .child(playlist.name.clone()),
                         )
-                        .child(div().text_xs().text_color(white(0.5)).child(format!(
-                            "{} songs · {available} available",
-                            playlist.paths.len()
-                        )))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(dynamic_subtitle(is_light))
+                                .child(format!("{} songs · {available} available", playlist.paths.len())),
+                        )
                 }),
             )),
         )
@@ -146,11 +160,22 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
     v_flex()
         .size_full()
         .min_h_0()
-        .child(app_bar(detail.as_deref().unwrap_or("Playlists")))
-        .child(tab_transition(format!("playlist-body-{detail:?}"), body))
-        .child(h_flex().flex_shrink_0().p(px(12.0)).justify_end().child(
-            Button::new("new-playlist").label("New playlist").on_click(
-                cx.listener(|this, _, window, cx| this.create_playlist_dialog(window, cx)),
-            ),
-        ))
+        .relative()
+        .child(top_fade(is_light))
+        .child(
+            v_flex()
+                .size_full()
+                .relative()
+                .child(app_bar(detail.as_deref().unwrap_or("Playlists"), is_light))
+                .child(tab_transition(format!("playlist-body-{detail:?}"), body))
+                .child(
+                    h_flex().flex_shrink_0().p(px(12.0)).justify_end().child(
+                        Button::new("new-playlist").label("New playlist").on_click(
+                            cx.listener(|this, _, window, cx| {
+                                this.create_playlist_dialog(window, cx)
+                            }),
+                        ),
+                    ),
+                ),
+        )
 }

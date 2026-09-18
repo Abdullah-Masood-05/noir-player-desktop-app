@@ -25,6 +25,37 @@ pub fn tab_transition(id: impl Into<ElementId>, content: impl IntoElement) -> An
         .into_any_element()
 }
 
+pub fn modal_transition(id: impl Into<ElementId>, content: impl IntoElement) -> AnyElement {
+    div()
+        .w_full()
+        .flex()
+        .justify_center()
+        .child(content)
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(220)).with_easing(ease_out_quint),
+            move |element, progress| {
+                let y = (1.0 - progress) * 20.0;
+                element.relative().top(px(y)).opacity(progress)
+            },
+        )
+        .into_any_element()
+}
+
+pub fn backdrop_transition(id: impl Into<ElementId>, content: impl IntoElement) -> AnyElement {
+    div()
+        .size_full()
+        .child(content)
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(180)),
+            move |element, progress| {
+                element.opacity(progress)
+            },
+        )
+        .into_any_element()
+}
+
 fn ease_out_quint(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(5)
 }

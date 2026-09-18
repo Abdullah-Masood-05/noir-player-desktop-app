@@ -1,15 +1,47 @@
-//! Shared Noir theme helpers: brand palette, icon and image helpers.
+use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 
 #[path = "motion.rs"]
 pub mod motion;
 
-pub use motion::{selected_highlight, smooth_scroll, tab_transition};
+pub use motion::{
+    backdrop_transition, modal_transition, selected_highlight, smooth_scroll, tab_transition,
+};
 
 pub const RED: u32 = 0xE53935;
 pub const BG: u32 = 0x121212;
 pub const SURFACE: u32 = 0x1E1E1E;
 pub const NAV_BG: u32 = 0x181818;
+
+pub fn apply_theme(mode: &str, cx: &mut App) {
+    let is_light = mode.eq_ignore_ascii_case("light");
+    if is_light {
+        Theme::change(ThemeMode::Light, None, cx);
+        let theme = Theme::global_mut(cx);
+        theme.primary = rgb(0xE53935).into();
+        theme.primary_foreground = rgb(0xFFFFFF).into();
+        theme.background = rgb(0xF8F9FA).into();
+        theme.foreground = rgb(0x18181B).into();
+        theme.popover = rgb(0xFFFFFF).into();
+        theme.secondary = rgb(0xF0F1F3).into();
+        theme.muted = rgb(0xEBEDF0).into();
+        theme.muted_foreground = rgb(0x71717A).into();
+        theme.border = rgb(0xE4E4E7).into();
+    } else {
+        Theme::change(ThemeMode::Dark, None, cx);
+        let theme = Theme::global_mut(cx);
+        theme.primary = rgb(0xE53935).into();
+        theme.primary_foreground = rgb(0xFFFFFF).into();
+        theme.background = rgb(0x121212).into();
+        theme.foreground = rgb(0xFFFFFF).into();
+        theme.popover = rgb(0x1E1E1E).into();
+        theme.secondary = rgb(0x1E1E1E).into();
+        theme.muted = rgb(0x1E1E1E).into();
+        theme.muted_foreground = rgb(0xFFFFFF).alpha(0.55).into();
+        theme.border = rgb(0x2A2A2A).into();
+    }
+    Theme::sync_base(cx);
+}
 
 pub fn red() -> Hsla {
     rgb(RED).into()

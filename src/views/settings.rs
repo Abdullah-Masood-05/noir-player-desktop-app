@@ -1,3 +1,4 @@
+use gpui_kit::assets::IconName as MusicIcon;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::*;
@@ -5,7 +6,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
-use crate::media::EQ_PRESETS;
 use crate::views::ui::{icon_text, red, white};
 
 fn c(hex: u32) -> Hsla {
@@ -15,8 +15,8 @@ fn c(hex: u32) -> Hsla {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsCategory {
     All,
-    Equalizer,
     Playback,
+    Equalizer,
     Appearance,
     Library,
     About,
@@ -26,8 +26,8 @@ impl SettingsCategory {
     pub fn label(&self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::Equalizer => "Equalizer",
             Self::Playback => "Playback",
+            Self::Equalizer => "Equalizer",
             Self::Appearance => "Appearance",
             Self::Library => "Library",
             Self::About => "About",
@@ -76,7 +76,9 @@ pub fn render_settings_modal(
                 .shadow(vec![BoxShadow::new(px(0.0), px(24.0), c(0x000000))
                     .blur_radius(px(48.0))])
                 .overflow_hidden()
-                .on_click(|_, _, _| {})
+                .on_click(cx.listener(|_, _, _, cx| {
+                    cx.stop_propagation();
+                }))
                 .child(modal_header(model, cx))
                 .child(category_chips(model, cx))
                 .child(
@@ -109,7 +111,7 @@ fn modal_header(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> D
             div()
                 .text_color(white(0.4))
                 .flex_shrink_0()
-                .child(icon_text(gpui_kit::assets::IconName::Search, 16.0)),
+                .child(icon_text(MusicIcon::Search, 16.0)),
         )
         .child(div().flex_1().child(Input::new(&model.settings_search)))
         .child(
@@ -123,8 +125,11 @@ fn modal_header(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> D
                 .cursor_pointer()
                 .text_color(white(0.5))
                 .hover(|s| s.text_color(white(1.0)))
-                .on_click(cx.listener(|this, _, _, cx| this.close_settings(cx)))
-                .child(icon_text(gpui_kit::assets::IconName::X, 14.0)),
+                .on_click(cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.close_settings(cx);
+                }))
+                .child(icon_text(MusicIcon::X, 14.0)),
         )
 }
 
@@ -132,8 +137,8 @@ fn category_chips(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
     let current = model.settings_category;
     const CATS: [SettingsCategory; 6] = [
         SettingsCategory::All,
-        SettingsCategory::Equalizer,
         SettingsCategory::Playback,
+        SettingsCategory::Equalizer,
         SettingsCategory::Appearance,
         SettingsCategory::Library,
         SettingsCategory::About,
@@ -161,6 +166,7 @@ fn category_chips(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
                 .cursor_pointer()
                 .hover(|s| s.bg(c(0x26292F)).text_color(white(0.9)))
                 .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
                     this.settings_category = cat;
                     this.settings_selected_index = 0;
                     cx.notify();
@@ -179,18 +185,63 @@ fn build_rows(
     let mut rows: Vec<AnyElement> = Vec::new();
     let mut idx = 0_usize;
 
+    // ── Equalizer rows ──────────────────────────────────────────────────────────
     let eq_visible = cat == SettingsCategory::All || cat == SettingsCategory::Equalizer;
     let eq_match =
-        query.is_empty() || "equalizer eq sound preset bass treble vocal rock pop".contains(query);
+        query.is_empty() || "equalizer eq sound audio preset bass treble vocal rock pop".contains(query);
 
     if eq_visible && eq_match {
-        // EQ on/off toggle
         let eq_enabled = model.store.equalizer_enabled;
+        let active_preset = model.store.equalizer_preset.clone();
+
+        // 1. Equalizer dedicated launcher button
         let active = idx == selected;
         rows.push(
             row_base(idx, active, cx)
                 .justify_between()
-                .child(label_cell("Equalizer", "5-band real-time audio filter"))
+                .child(label_cell(
+                    "Equalizer Panel",
+                    &format!("5-band parametric frequency shaper (Preset: {active_preset})"),
+                ))
+                .child(
+                    div()
+                        .id("open-eq-modal-btn")
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .rounded_lg()
+                        .bg(red())
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(white(1.0))
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.88))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.open_equalizer(cx);
+                        }))
+                        .child(icon_text(MusicIcon::SlidersHorizontal, 14.0))
+                        .child("Open Equalizer"),
+                )
+                .into_any_element(),
+        );
+        idx += 1;
+
+        // 2. EQ on/off quick toggle
+        let active = idx == selected;
+        rows.push(
+            row_base(idx, active, cx)
+                .justify_between()
+                .child(label_cell(
+                    "Equalizer Filter",
+                    if eq_enabled {
+                        "Active — real-time sound enhancement enabled"
+                    } else {
+                        "Bypassed — raw audio stream output"
+                    },
+                ))
                 .child(toggle_switch("eq-toggle", eq_enabled, cx, |this, _, _, cx| {
                     let next = !this.store.equalizer_enabled;
                     this.store.equalizer_enabled = next;
@@ -202,37 +253,9 @@ fn build_rows(
                 .into_any_element(),
         );
         idx += 1;
-
-        // EQ Presets
-        let preset = model.store.equalizer_preset.clone();
-        let active = idx == selected;
-        rows.push(
-            row_base(idx, active, cx)
-                .flex_col()
-                .items_start()
-                .gap(px(8.0))
-                .child(label_cell("Presets", &format!("Active: {preset}")))
-                .child(preset_chips_row(&preset, cx))
-                .into_any_element(),
-        );
-        idx += 1;
-
-        // EQ Bands
-        let active = idx == selected;
-        let gains = model.store.equalizer_gains;
-        let eq_on = model.store.equalizer_enabled;
-        rows.push(
-            row_base(idx, active, cx)
-                .flex_col()
-                .items_start()
-                .gap(px(10.0))
-                .child(label_cell("Frequency Bands", "Adjust −12 dB to +12 dB per band"))
-                .child(eq_bands_row(gains, eq_on, cx))
-                .into_any_element(),
-        );
-        idx += 1;
     }
 
+    // ── Playback rows ───────────────────────────────────────────────────────────
     let pb_visible = cat == SettingsCategory::All || cat == SettingsCategory::Playback;
     let pb_match =
         query.is_empty() || "playback seek skip interval seconds resume startup".contains(query);
@@ -245,7 +268,7 @@ fn build_rows(
                 .justify_between()
                 .child(label_cell(
                     "Skip Interval",
-                    "Seconds to jump on forward/backward skip",
+                    "Seconds to jump on forward/backward skip buttons (5s, 10s, 15s, 30s, 60s)",
                 ))
                 .child(stepper(
                     "seek",
@@ -254,14 +277,22 @@ fn build_rows(
                     |this, _, _, cx| {
                         this.store.seek_interval_seconds =
                             match this.store.seek_interval_seconds {
-                                60 => 30, 30 => 15, 15 => 10, 10 => 5, _ => 5,
+                                60 => 30,
+                                30 => 15,
+                                15 => 10,
+                                10 => 5,
+                                _ => 5,
                             };
                         this.save_current_store(cx);
                     },
                     |this, _, _, cx| {
                         this.store.seek_interval_seconds =
                             match this.store.seek_interval_seconds {
-                                5 => 10, 10 => 15, 15 => 30, 30 => 60, _ => 60,
+                                5 => 10,
+                                10 => 15,
+                                15 => 30,
+                                30 => 60,
+                                _ => 60,
                             };
                         this.save_current_store(cx);
                     },
@@ -277,7 +308,7 @@ fn build_rows(
                 .justify_between()
                 .child(label_cell(
                     "Resume on Startup",
-                    "Re-open last played song on launch",
+                    "Automatically re-open and queue last played song on launch",
                 ))
                 .child(toggle_switch("resume-toggle", resume, cx, |this, _, _, cx| {
                     this.store.resume_last_song = !this.store.resume_last_song;
@@ -288,8 +319,51 @@ fn build_rows(
         idx += 1;
     }
 
+    // ── Appearance rows ─────────────────────────────────────────────────────────
+    let app_visible = cat == SettingsCategory::All || cat == SettingsCategory::Appearance;
+    let app_match = query.is_empty() || "appearance theme dark red color style".contains(query);
+
+    if app_visible && app_match {
+        let active = idx == selected;
+        rows.push(
+            row_base(idx, active, cx)
+                .justify_between()
+                .child(label_cell(
+                    "Theme Palette",
+                    "Dark Noir theme with signature crimson red accents",
+                ))
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .size(px(18.0))
+                                .rounded_full()
+                                .bg(red())
+                                .border(px(1.0))
+                                .border_color(white(0.3)),
+                        )
+                        .child(
+                            div()
+                                .px(px(8.0))
+                                .py(px(3.0))
+                                .rounded_md()
+                                .bg(c(0x1C1F26))
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(white(0.85))
+                                .child("Noir Red Dark"),
+                        ),
+                )
+                .into_any_element(),
+        );
+        idx += 1;
+    }
+
+    // ── Library rows ────────────────────────────────────────────────────────────
     let lib_visible = cat == SettingsCategory::All || cat == SettingsCategory::Library;
-    let lib_match = query.is_empty() || "music folder library rescan".contains(query);
+    let lib_match = query.is_empty() || "music folder library rescan files scan".contains(query);
 
     if lib_visible && lib_match {
         let folder = model
@@ -307,7 +381,7 @@ fn build_rows(
                     div()
                         .id("rescan-btn")
                         .px(px(14.0))
-                        .py(px(5.0))
+                        .py(px(6.0))
                         .rounded_lg()
                         .bg(red())
                         .text_xs()
@@ -315,7 +389,10 @@ fn build_rows(
                         .text_color(white(1.0))
                         .cursor_pointer()
                         .hover(|s| s.opacity(0.85))
-                        .on_click(cx.listener(|this, _, _, cx| this.rescan(cx)))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.rescan(cx);
+                        }))
                         .child("Rescan Library"),
                 )
                 .into_any_element(),
@@ -323,8 +400,9 @@ fn build_rows(
         idx += 1;
     }
 
+    // ── About rows ──────────────────────────────────────────────────────────────
     let ab_visible = cat == SettingsCategory::All || cat == SettingsCategory::About;
-    let ab_match = query.is_empty() || "about noir player version".contains(query);
+    let ab_match = query.is_empty() || "about noir player version info".contains(query);
 
     if ab_visible && ab_match {
         let active = idx == selected;
@@ -333,7 +411,7 @@ fn build_rows(
                 .justify_between()
                 .child(label_cell(
                     "Noir Player",
-                    "Version 1.1.3 — Desktop music player with GPUI",
+                    "Version 1.1.3 — Desktop music player with GPUI & real-time audio engine",
                 ))
                 .child(
                     h_flex()
@@ -348,7 +426,7 @@ fn build_rows(
                                 .items_center()
                                 .justify_center()
                                 .text_color(white(1.0))
-                                .child(icon_text(gpui_kit::assets::IconName::Music4, 18.0)),
+                                .child(icon_text(MusicIcon::Music4, 18.0)),
                         )
                         .child(
                             div()
@@ -360,7 +438,6 @@ fn build_rows(
                 )
                 .into_any_element(),
         );
-        // idx += 1;
     }
 
     rows
@@ -372,7 +449,6 @@ fn row_base(idx: usize, active: bool, cx: &mut Context<NoirPlayerModel>) -> Stat
     h_flex()
         .id(SharedString::from(format!("row-{idx}")))
         .w_full()
-        .flex_wrap()
         .items_center()
         .px(px(14.0))
         .py(px(11.0))
@@ -382,6 +458,7 @@ fn row_base(idx: usize, active: bool, cx: &mut Context<NoirPlayerModel>) -> Stat
         .border_color(if active { red().alpha(0.7) } else { c(0x222428) })
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
+            cx.stop_propagation();
             this.settings_selected_index = idx;
             cx.notify();
         }))
@@ -431,7 +508,10 @@ where
         .flex()
         .items_center()
         .cursor_pointer()
-        .on_click(cx.listener(handler))
+        .on_click(cx.listener(move |this, event, window, cx| {
+            cx.stop_propagation();
+            handler(this, event, window, cx);
+        }))
         .child(
             div()
                 .size(px(20.0))
@@ -445,9 +525,9 @@ where
                 .items_center()
                 .justify_center()
                 .child(if on {
-                    icon_text(gpui_kit::assets::IconName::Check, 12.0).text_color(red())
+                    icon_text(MusicIcon::Check, 12.0).text_color(red())
                 } else {
-                    icon_text(gpui_kit::assets::IconName::X, 10.0).text_color(c(0x555966))
+                    icon_text(MusicIcon::X, 10.0).text_color(c(0x555966))
                 }),
         )
 }
@@ -490,7 +570,10 @@ where
                 .text_color(white(0.8))
                 .cursor_pointer()
                 .hover(|s| s.bg(c(0xFF000033)))
-                .on_click(cx.listener(dec))
+                .on_click(cx.listener(move |this, event, window, cx| {
+                    cx.stop_propagation();
+                    dec(this, event, window, cx);
+                }))
                 .child("\u{2212}"),
         )
         .child(
@@ -516,140 +599,12 @@ where
                 .text_color(white(0.8))
                 .cursor_pointer()
                 .hover(|s| s.bg(c(0xFF000033)))
-                .on_click(cx.listener(inc))
+                .on_click(cx.listener(move |this, event, window, cx| {
+                    cx.stop_propagation();
+                    inc(this, event, window, cx);
+                }))
                 .child("+"),
         )
-}
-
-fn preset_chips_row(current: &str, cx: &mut Context<NoirPlayerModel>) -> Div {
-    h_flex()
-        .items_center()
-        .gap(px(4.0))
-        .flex_wrap()
-        .children(EQ_PRESETS.iter().map(|&(name, gains)| {
-            let active = current == name;
-            div()
-                .id(SharedString::from(format!("preset-{name}")))
-                .px(px(9.0))
-                .py(px(4.0))
-                .rounded_md()
-                .text_xs()
-                .font_weight(if active { FontWeight::BOLD } else { FontWeight::NORMAL })
-                .bg(if active { red() } else { c(0x1E2129) })
-                .border(px(1.0))
-                .border_color(if active { red() } else { c(0x2A2D38) })
-                .text_color(if active { white(1.0) } else { white(0.65) })
-                .cursor_pointer()
-                .hover(|s| s.bg(c(0x26293A)).text_color(white(0.9)))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.store.equalizer_preset = name.to_string();
-                    this.store.equalizer_gains = gains;
-                    this.store.equalizer_enabled = true;
-                    if let Some(p) = this.player.as_ref() {
-                        p.set_equalizer_enabled(true);
-                        p.set_equalizer_gains(gains);
-                    }
-                    this.save_current_store(cx);
-                }))
-                .child(name)
-        }))
-}
-
-fn eq_bands_row(gains: [f32; 5], enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
-    const LABELS: [&str; 5] = ["60Hz", "230Hz", "910Hz", "3.6k", "14k"];
-
-    h_flex()
-        .w_full()
-        .gap(px(5.0))
-        .children((0..5usize).map(|bi| {
-            let gain = gains[bi];
-            let freq = LABELS[bi];
-            let gain_str = if gain > 0.0 {
-                format!("+{gain:.0}dB")
-            } else {
-                format!("{gain:.0}dB")
-            };
-            let hot = enabled && gain.abs() > 0.1;
-
-            v_flex()
-                .flex_1()
-                .items_center()
-                .gap(px(4.0))
-                .p(px(7.0))
-                .rounded_lg()
-                .bg(c(0x18191F))
-                .border(px(1.0))
-                .border_color(if hot { red().alpha(0.45) } else { c(0x222428) })
-                .child(
-                    div()
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(if hot { red() } else { white(0.5) })
-                        .child(gain_str),
-                )
-                .child(
-                    h_flex()
-                        .items_center()
-                        .rounded_md()
-                        .bg(c(0x111215))
-                        .border(px(1.0))
-                        .border_color(c(0x2A2D35))
-                        .overflow_hidden()
-                        .child(
-                            div()
-                                .id(SharedString::from(format!("band-m-{bi}")))
-                                .px(px(5.0))
-                                .py(px(3.0))
-                                .text_sm()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(white(0.75))
-                                .cursor_pointer()
-                                .hover(|s| s.bg(c(0xFF000033)))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let mut g = this.store.equalizer_gains;
-                                    g[bi] = (g[bi] - 1.0).max(-12.0);
-                                    this.store.equalizer_gains = g;
-                                    this.store.equalizer_preset = "Custom".into();
-                                    if let Some(p) = this.player.as_ref() {
-                                        p.set_equalizer_gains(g);
-                                    }
-                                    this.save_current_store(cx);
-                                }))
-                                .child("\u{2212}"),
-                        )
-                        .child(
-                            div()
-                                .px(px(4.0))
-                                .py(px(3.0))
-                                .text_xs()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(white(0.6))
-                                .child(freq),
-                        )
-                        .child(
-                            div()
-                                .id(SharedString::from(format!("band-p-{bi}")))
-                                .px(px(5.0))
-                                .py(px(3.0))
-                                .text_sm()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(white(0.75))
-                                .cursor_pointer()
-                                .hover(|s| s.bg(c(0xFF000033)))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let mut g = this.store.equalizer_gains;
-                                    g[bi] = (g[bi] + 1.0).min(12.0);
-                                    this.store.equalizer_gains = g;
-                                    this.store.equalizer_preset = "Custom".into();
-                                    if let Some(p) = this.player.as_ref() {
-                                        p.set_equalizer_gains(g);
-                                    }
-                                    this.save_current_store(cx);
-                                }))
-                                .child("+"),
-                        ),
-                )
-        }))
 }
 
 fn keyboard_hints() -> Div {

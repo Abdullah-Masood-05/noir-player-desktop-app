@@ -97,6 +97,7 @@ pub struct NoirPlayerModel {
     discover_cached: Vec<media::PreparedAudio>,
     discover_downloads: Vec<Track>,
     pub settings_open: bool,
+    pub equalizer_open: bool,
     pub settings_category: crate::views::settings::SettingsCategory,
     pub settings_search: Entity<InputState>,
     pub settings_selected_index: usize,
@@ -181,6 +182,7 @@ impl NoirPlayerModel {
             discover_cached: Vec::new(),
             discover_downloads: Vec::new(),
             settings_open: false,
+            equalizer_open: false,
             settings_category: crate::views::settings::SettingsCategory::All,
             settings_search,
             settings_selected_index: 0,
@@ -526,12 +528,14 @@ impl NoirPlayerModel {
         self.save_store(store, cx)
     }
 
+    #[allow(dead_code)]
     pub fn open_settings(
         &mut self,
         category: crate::views::settings::SettingsCategory,
         cx: &mut Context<Self>,
     ) {
         self.settings_open = true;
+        self.equalizer_open = false;
         self.settings_category = category;
         self.settings_selected_index = 0;
         cx.notify();
@@ -544,6 +548,28 @@ impl NoirPlayerModel {
 
     pub fn toggle_settings(&mut self, cx: &mut Context<Self>) {
         self.settings_open = !self.settings_open;
+        if self.settings_open {
+            self.equalizer_open = false;
+        }
+        cx.notify();
+    }
+
+    pub fn open_equalizer(&mut self, cx: &mut Context<Self>) {
+        self.equalizer_open = true;
+        self.settings_open = false;
+        cx.notify();
+    }
+
+    pub fn close_equalizer(&mut self, cx: &mut Context<Self>) {
+        self.equalizer_open = false;
+        cx.notify();
+    }
+
+    pub fn toggle_equalizer(&mut self, cx: &mut Context<Self>) {
+        self.equalizer_open = !self.equalizer_open;
+        if self.equalizer_open {
+            self.settings_open = false;
+        }
         cx.notify();
     }
 
@@ -944,10 +970,15 @@ impl Render for NoirPlayerModel {
             .relative()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .when(self.settings_open, |d| {
+            .when(self.settings_open || self.equalizer_open, |d| {
                 d.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                     if event.keystroke.key == "escape" || event.keystroke.key == "Escape" {
-                        this.close_settings(cx);
+                        if this.equalizer_open {
+                            this.close_equalizer(cx);
+                        }
+                        if this.settings_open {
+                            this.close_settings(cx);
+                        }
                     }
                 }))
             })
@@ -1007,6 +1038,9 @@ impl Render for NoirPlayerModel {
             })
             .child(nav::bottom_nav(active_tab, self.settings_open, cx))
             .children(dialog_layer)
+            .when(self.equalizer_open, |d| {
+                d.child(crate::views::equalizer::render_equalizer_modal(self, cx))
+            })
             .when(self.settings_open, |d| {
                 d.child(crate::views::settings::render_settings_modal(self, cx))
             })

@@ -215,7 +215,8 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
                         .cursor_pointer()
                         .hover(|s| s.bg(white(0.08)).text_color(white(1.0)))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_settings(crate::views::settings::SettingsCategory::Equalizer, cx);
+                            cx.stop_propagation();
+                            this.toggle_equalizer(cx);
                         }))
                         .child(icon_text(MusicIcon::SlidersHorizontal, 20.0)),
                 )
@@ -231,7 +232,8 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
                         .cursor_pointer()
                         .hover(|s| s.bg(white(0.08)).text_color(white(1.0)))
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.open_settings(crate::views::settings::SettingsCategory::All, cx);
+                            cx.stop_propagation();
+                            this.toggle_settings(cx);
                         }))
                         .child(icon_text(MusicIcon::Settings, 20.0)),
                 ),

@@ -477,11 +477,231 @@ fn decoded_duration(path: &Path) -> Result<Duration> {
     ))
 }
 
+pub const EQ_FREQUENCIES: [f32; 5] = [60.0, 230.0, 910.0, 3600.0, 14000.0];
+
+pub const EQ_PRESETS: &[(&str, [f32; 5])] = &[
+    ("Flat", [0.0, 0.0, 0.0, 0.0, 0.0]),
+    ("Bass Boost", [6.0, 4.0, 1.0, 0.0, 0.0]),
+    ("Treble Boost", [0.0, 0.0, 1.0, 4.0, 6.0]),
+    ("Vocal", [-2.0, 1.0, 5.0, 3.0, 0.0]),
+    ("Rock", [5.0, 3.0, -1.0, 3.0, 5.0]),
+    ("Pop", [2.0, 4.0, 3.0, 1.0, -1.0]),
+];
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EqualizerState {
+    pub enabled: bool,
+    pub gains: [f32; 5],
+}
+
+impl Default for EqualizerState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gains: [0.0; 5],
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BiquadCoeffs {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+}
+
+impl BiquadCoeffs {
+    pub fn identity() -> Self {
+        Self {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+        }
+    }
+
+    pub fn peaking(f0: f32, gain_db: f32, sample_rate: f32, q: f32) -> Self {
+        if gain_db.abs() < 0.05 || f0 <= 0.0 || sample_rate <= 0.0 || f0 >= sample_rate * 0.49 {
+            return Self::identity();
+        }
+        let a = 10.0_f32.powf(gain_db / 40.0);
+        let w0 = 2.0 * std::f32::consts::PI * (f0 / sample_rate);
+        let cos_w0 = w0.cos();
+        let sin_w0 = w0.sin();
+        let alpha = sin_w0 / (2.0 * q);
+
+        let b0 = 1.0 + alpha * a;
+        let b1 = -2.0 * cos_w0;
+        let b2 = 1.0 - alpha * a;
+        let a0 = 1.0 + alpha / a;
+        let a1 = -2.0 * cos_w0;
+        let a2 = 1.0 - alpha / a;
+
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BiquadChannel {
+    x1: f32,
+    x2: f32,
+    y1: f32,
+    y2: f32,
+}
+
+impl BiquadChannel {
+    #[inline]
+    pub fn process(&mut self, input: f32, coeffs: &BiquadCoeffs) -> f32 {
+        let output = coeffs.b0 * input + coeffs.b1 * self.x1 + coeffs.b2 * self.x2
+            - coeffs.a1 * self.y1 - coeffs.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = input;
+        self.y2 = self.y1;
+        self.y1 = output;
+        output
+    }
+}
+
+pub struct EqualizerSource<I> {
+    input: I,
+    channels: u16,
+    sample_rate: u32,
+    current_channel: usize,
+    filters: Vec<Vec<BiquadChannel>>,
+    coeffs: [BiquadCoeffs; 5],
+    cached_gains: [f32; 5],
+    state: Arc<std::sync::RwLock<EqualizerState>>,
+}
+
+impl<I> EqualizerSource<I>
+where
+    I: Source<Item = f32>,
+{
+    pub fn new(input: I, state: Arc<std::sync::RwLock<EqualizerState>>) -> Self {
+        let channels = input.channels().max(1);
+        let sample_rate = input.sample_rate().max(1);
+        let mut filters = Vec::with_capacity(5);
+        for _ in 0..5 {
+            filters.push(vec![BiquadChannel::default(); channels as usize]);
+        }
+        let initial_gains = state.read().map(|s| s.gains).unwrap_or([0.0; 5]);
+        let mut coeffs = [BiquadCoeffs::identity(); 5];
+        for b in 0..5 {
+            coeffs[b] = BiquadCoeffs::peaking(
+                EQ_FREQUENCIES[b],
+                initial_gains[b],
+                sample_rate as f32,
+                1.0,
+            );
+        }
+        Self {
+            input,
+            channels,
+            sample_rate,
+            current_channel: 0,
+            filters,
+            coeffs,
+            cached_gains: initial_gains,
+            state,
+        }
+    }
+}
+
+impl<I> Source for EqualizerSource<I>
+where
+    I: Source<Item = f32>,
+{
+    #[inline]
+    fn current_span_len(&self) -> Option<usize> {
+        self.input.current_span_len()
+    }
+
+    #[inline]
+    fn channels(&self) -> u16 {
+        self.channels
+    }
+
+    #[inline]
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    #[inline]
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
+
+    #[inline]
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        self.current_channel = 0;
+        for band in &mut self.filters {
+            for ch in band {
+                *ch = BiquadChannel::default();
+            }
+        }
+        self.input.try_seek(pos)
+    }
+}
+
+impl<I> Iterator for EqualizerSource<I>
+where
+    I: Source<Item = f32>,
+{
+    type Item = f32;
+
+    #[inline]
+    fn next(&mut self) -> Option<f32> {
+        let sample = self.input.next()?;
+
+        if self.current_channel == 0 {
+            if let Ok(state) = self.state.read() {
+                if !state.enabled {
+                    self.current_channel = (self.current_channel + 1) % (self.channels as usize);
+                    return Some(sample);
+                }
+                if state.gains != self.cached_gains {
+                    self.cached_gains = state.gains;
+                    for b in 0..5 {
+                        self.coeffs[b] = BiquadCoeffs::peaking(
+                            EQ_FREQUENCIES[b],
+                            self.cached_gains[b],
+                            self.sample_rate as f32,
+                            1.0,
+                        );
+                    }
+                }
+            }
+        }
+
+        let ch = self.current_channel;
+        self.current_channel = (ch + 1) % (self.channels as usize);
+
+        let mut out = sample;
+        for b in 0..5 {
+            if self.cached_gains[b].abs() >= 0.05 {
+                out = self.filters[b][ch].process(out, &self.coeffs[b]);
+            }
+        }
+
+        Some(out.clamp(-1.0, 1.0))
+    }
+}
+
 pub struct MediaPlayer {
     sink: Sink,
     stream: OutputStream,
     duration: Option<Duration>,
     loaded: bool,
+    pub eq_state: Arc<std::sync::RwLock<EqualizerState>>,
 }
 
 impl MediaPlayer {
@@ -490,11 +710,13 @@ impl MediaPlayer {
             .context("Failed to open an audio output device")?;
         let sink = Sink::connect_new(stream.mixer());
         sink.pause();
+        let eq_state = Arc::new(std::sync::RwLock::new(EqualizerState::default()));
         Ok(Self {
             sink,
             stream,
             duration: None,
             loaded: false,
+            eq_state,
         })
     }
 
@@ -512,7 +734,8 @@ impl MediaPlayer {
         let sink = Sink::connect_new(self.stream.mixer());
         sink.pause();
         sink.set_volume(self.sink.volume());
-        sink.append(decoder);
+        let eq_source = EqualizerSource::new(decoder, self.eq_state.clone());
+        sink.append(eq_source);
         self.sink.stop();
         self.sink = sink;
         self.duration = duration;
@@ -560,6 +783,51 @@ impl MediaPlayer {
         self.sink
             .try_seek(position)
             .map_err(|error| anyhow!("Failed to seek audio: {error}"))
+    }
+
+    pub fn skip_forward(&self, offset: Duration) -> Result<()> {
+        if !self.loaded || self.sink.empty() {
+            bail!("No active track to seek; load a track first");
+        }
+        let current = self.position();
+        let duration = self.duration.unwrap_or(current + offset);
+        let target = (current + offset).min(duration);
+        self.seek(target)
+    }
+
+    pub fn skip_backward(&self, offset: Duration) -> Result<()> {
+        if !self.loaded || self.sink.empty() {
+            bail!("No active track to seek; load a track first");
+        }
+        let current = self.position();
+        let target = current.saturating_sub(offset);
+        self.seek(target)
+    }
+
+    pub fn set_equalizer_enabled(&self, enabled: bool) {
+        if let Ok(mut state) = self.eq_state.write() {
+            state.enabled = enabled;
+        }
+    }
+
+    pub fn set_equalizer_gains(&self, gains: [f32; 5]) {
+        if let Ok(mut state) = self.eq_state.write() {
+            state.gains = gains;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn set_equalizer_band(&self, band: usize, gain_db: f32) {
+        if band < 5 {
+            if let Ok(mut state) = self.eq_state.write() {
+                state.gains[band] = gain_db.clamp(-12.0, 12.0);
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn equalizer_state(&self) -> EqualizerState {
+        self.eq_state.read().map(|s| s.clone()).unwrap_or_default()
     }
 
     #[allow(dead_code)]
@@ -902,5 +1170,65 @@ mod tests {
         let root = scan_folder(&temp.0.join("directory-link"));
         assert!(root.tracks.is_empty());
         assert_eq!(root.errors.len(), 1);
+    }
+
+    #[test]
+    fn equalizer_coefficients_and_neutral_state() {
+        let state = EqualizerState::default();
+        assert!(!state.enabled);
+        assert_eq!(state.gains, [0.0; 5]);
+
+        let neutral = BiquadCoeffs::peaking(1000.0, 44100.0, 0.0, 1.0);
+        let mut ch = BiquadChannel::default();
+        assert_eq!(ch.process(0.5, &neutral), 0.5);
+
+        let boost = BiquadCoeffs::peaking(1000.0, 44100.0, 6.0, 1.0);
+        let out = ch.process(0.5, &boost);
+        assert!(out.is_finite());
+        assert_ne!(out, 0.0);
+    }
+
+    #[test]
+    fn equalizer_source_processes_audio_and_seeks() {
+        let temp = TempDir::new();
+        let path = temp.0.join("eq_test.wav");
+        write_wav(&path);
+        let decoder = decode_file(&path).unwrap();
+
+        let state = Arc::new(std::sync::RwLock::new(EqualizerState {
+            enabled: true,
+            gains: [6.0, 3.0, 0.0, -3.0, -6.0],
+        }));
+
+        let mut eq_source = EqualizerSource::new(decoder, state.clone());
+        assert_eq!(eq_source.channels(), 1);
+        assert_eq!(eq_source.sample_rate(), 8000);
+        assert_eq!(eq_source.total_duration(), Some(Duration::from_secs(1)));
+
+        let mut sample_count = 0;
+        for _ in 0..100 {
+            if let Some(s) = eq_source.next() {
+                assert!(s.is_finite());
+                sample_count += 1;
+            }
+        }
+        assert_eq!(sample_count, 100);
+
+        assert!(eq_source.try_seek(Duration::from_millis(200)).is_ok());
+        let sample_after_seek = eq_source.next();
+        assert!(sample_after_seek.is_some());
+    }
+
+    #[test]
+    fn equalizer_presets_are_valid() {
+        assert_eq!(EQ_FREQUENCIES.len(), 5);
+        assert_eq!(EQ_FREQUENCIES, [60.0, 230.0, 910.0, 3600.0, 14000.0]);
+        for (name, gains) in EQ_PRESETS {
+            assert!(!name.is_empty());
+            assert_eq!(gains.len(), 5);
+            for &g in gains {
+                assert!((-12.0..=12.0).contains(&g), "Preset {name} gain out of bounds: {g}");
+            }
+        }
     }
 }

@@ -7,13 +7,63 @@ use serde::{Deserialize, Serialize};
 
 use crate::media::Track;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Store {
     #[serde(default)]
     pub playlists: Vec<SavedPlaylist>,
     #[serde(default)]
     pub favourites: Vec<PathBuf>,
+    #[serde(default = "default_seek_interval")]
+    pub seek_interval_seconds: u32,
+    #[serde(default)]
+    pub equalizer_enabled: bool,
+    #[serde(default = "default_equalizer_gains")]
+    pub equalizer_gains: [f32; 5],
+    #[serde(default = "default_equalizer_preset")]
+    pub equalizer_preset: String,
+    #[serde(default = "default_theme_mode")]
+    pub theme_mode: String,
+    #[serde(default)]
+    pub music_folder: Option<PathBuf>,
+    #[serde(default = "default_resume_last_song")]
+    pub resume_last_song: bool,
+}
+
+fn default_seek_interval() -> u32 {
+    10
+}
+
+fn default_equalizer_gains() -> [f32; 5] {
+    [0.0; 5]
+}
+
+fn default_equalizer_preset() -> String {
+    "Flat".to_string()
+}
+
+fn default_theme_mode() -> String {
+    "dark".to_string()
+}
+
+fn default_resume_last_song() -> bool {
+    true
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self {
+            playlists: Vec::new(),
+            favourites: Vec::new(),
+            seek_interval_seconds: 10,
+            equalizer_enabled: false,
+            equalizer_gains: [0.0; 5],
+            equalizer_preset: "Flat".to_string(),
+            theme_mode: "dark".to_string(),
+            music_folder: None,
+            resume_last_song: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,5 +324,38 @@ mod tests {
             vec![0, 1, 2]
         );
         assert_eq!(paths.len(), 3);
+    }
+
+    #[test]
+    fn settings_persistence_and_defaults() {
+        let store = Store::default();
+        assert_eq!(store.seek_interval_seconds, 10);
+        assert!(!store.equalizer_enabled);
+        assert_eq!(store.equalizer_gains, [0.0; 5]);
+        assert_eq!(store.equalizer_preset, "Flat");
+
+        // Test backward compatibility: legacy JSON without settings fields
+        let legacy_json = r#"{"playlists":[],"favourites":[]}"#;
+        let loaded: Store = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(loaded.seek_interval_seconds, 10);
+        assert!(!loaded.equalizer_enabled);
+        assert_eq!(loaded.equalizer_gains, [0.0; 5]);
+        assert_eq!(loaded.equalizer_preset, "Flat");
+
+        // Test saving customized settings and reloading
+        let temp = TempDir::new();
+        let path = temp.0.join("settings_test.json");
+        let mut custom = Store::default();
+        custom.seek_interval_seconds = 5;
+        custom.equalizer_enabled = true;
+        custom.equalizer_gains = [6.0, 4.0, 1.0, 0.0, 0.0];
+        custom.equalizer_preset = "Bass Boost".to_string();
+        custom.save(&path).unwrap();
+
+        let reloaded = Store::load(&path).unwrap();
+        assert_eq!(reloaded.seek_interval_seconds, 5);
+        assert!(reloaded.equalizer_enabled);
+        assert_eq!(reloaded.equalizer_gains, [6.0, 4.0, 1.0, 0.0, 0.0]);
+        assert_eq!(reloaded.equalizer_preset, "Bass Boost");
     }
 }

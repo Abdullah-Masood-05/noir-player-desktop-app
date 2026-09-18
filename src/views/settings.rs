@@ -758,7 +758,7 @@ fn build_rows(
                                                 .text_xs()
                                                 .font_weight(FontWeight::BOLD)
                                                 .text_color(red())
-                                                .child("v1.1.3"),
+                                                .child(concat!("v", env!("CARGO_PKG_VERSION"))),
                                         ),
                                 )
                                 .child(

@@ -4,14 +4,37 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
-### Windows installers
+## [1.2.0]
 
-- Replace Windows ZIP packaging with unsigned x64 WiX MSI and NSIS setup installers, named `noir-player-VERSION-windows-x64.msi` and `noir-player-VERSION-windows-x64-setup.exe` in release assets.
-- Generate both installers with `cargo build --release` followed by `cargo installer`, or select an existing target build with `cargo installer --release-dir "target/x86_64-pc-windows-msvc/release"`. Outputs are `<release-dir>/bundle/msi/*.msi` and `<release-dir>/bundle/nsis/*.exe`; generating them does not install the application locally.
-- Use the optional `installer` feature and `windows_installer` binary with pinned `tauri-bundler 2.9.4` and `tauri-utils 2.9.3`, without adding a Tauri or WebView runtime to the application.
-- Automatically fetch WiX and NSIS into `target/installer-tools/.tauri`. MSI generation requires Windows PowerShell, .NET Framework 4.5 or later and enabled VBScript; no system WiX or NSIS installation is required.
-- Add Windows installer feature typechecking and Clippy with warnings denied, actual installer generation and downloadable CI artifacts on branches and pull requests without a release tag. Release packaging validates both installers and includes them in checksum verification and draft uploads.
-- Installer generation and artifact checks do not replace manual installation, uninstall, launch and playback testing. Signing remains unconfigured.
+### Multi-folder Library, Equalizer, Light Theme & Installers
+
+Version 1.2.0 brings major enhancements across audio, library organization, themes, user controls, and distribution packaging.
+
+### Highlights & New Features
+
+- **Multi-Folder Library Management**: Add and manage multiple folders to scan for music. Automatically scans all configured folders recursively and consolidates them into a unified, deduplicated library.
+- **Configurable Download Folder**: Choose custom storage locations for discovered songs downloaded from Last.fm / YouTube services, with sensible default fallbacks.
+- **5-Band Graphic Equalizer**: Built-in 5-band audio equalizer with custom gain controls and presets (Flat, Bass Boost, Treble Boost, Vocal Boost, Rock, Electronic). Accessible via `Ctrl+E` or header quick action.
+- **Adaptive Red & White Light Theme**: Introduced a light theme matching the mobile NoirPlayer app with elegant white cards, clean `#FAFAFA` background, `#1A1A1A` charcoal typography, and crimson accents.
+- **Vibrant Dark Theme Top Glow**: Restored the rich red aura wash at the top of Library, Discover, Playlists, and Player screens.
+- **Global Keyboard Shortcuts**:
+  - `Ctrl+,` — Open / close Settings modal
+  - `Ctrl+E` — Open Equalizer
+  - `Escape` — Dismiss open dialogs and overlays
+- **Fluid Modal Transitions & Scroll Isolation**: Smooth backdrop and dialog animations with scroll wheel containment preventing background songs from scrolling behind open modals.
+- **Rich Settings & About View**: Integrated quick category navigation, customizable seek intervals, theme switching, download and folder pickers, and app version details.
+- **Robust Storage & Backward Compatibility**: Removed strict unknown-field constraints on `playlists.json` to allow seamless forward and backward schema evolution across updates.
+- **Windows Installers**: Added WiX MSI (`noir-player-1.2.0-windows-x64.msi`) and NSIS setup (`noir-player-1.2.0-windows-x64-setup.exe`) generation support via `cargo installer`.
+
+### Downloads
+
+- Windows (x64 MSI): `noir-player-1.2.0-windows-x64.msi`
+- Windows (x64 Setup): `noir-player-1.2.0-windows-x64-setup.exe`
+- macOS (Apple Silicon): `noir-player-1.2.0-macos-arm64.dmg`
+- Linux (Debian & Ubuntu): `noir-player-1.2.0-linux-x64.deb`
+- Linux (Fedora & RHEL): `noir-player-1.2.0-linux-x64.rpm`
+- Linux (Arch): `noir-player-1.2.0-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or `SHA256SUMS`
 
 ## [1.1.3]
 

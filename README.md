@@ -6,17 +6,40 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Build targets](https://img.shields.io/badge/build_targets-Windows%20%7C%20macOS%20%7C%20Linux-555)](#packaging-and-releases)
 
-This is the desktop version of [NoirPlayer for Android](https://github.com/Abdullah-Masood-05/NoirPlayer), rebuilt in Rust with GPUI Kit. It uses the same red-and-dark theme and Discover services, with a local music library and playlists for desktop.
+This is the desktop version of [NoirPlayer for Android](https://github.com/Abdullah-Masood-05/NoirPlayer), rebuilt in Rust with GPUI Kit. It features both a rich red-and-dark theme with a crimson glowing top wash and an adaptive red-and-white light theme inspired by the mobile app, alongside multi-folder library scanning, a 5-band graphic equalizer, and Discover services.
 
-Version 1.1.3. See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
+Version 1.2.0. See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
 
 ## Playback and library
 
-The library scans the system Music folder recursively on startup and when rescanned. It reads title, artist, album, duration and embedded artwork, groups tracks by album and artist, and searches across title, artist and album. It does not follow symbolic links or Windows reparse points. There is no configurable library-folder picker.
+The library scans the system Music folder by default as well as any custom folders configured in **Settings** (`Ctrl+,`). Scanning runs recursively on startup and when rescanned, reading title, artist, album, duration, and embedded artwork. It groups tracks by album and artist, deduplicates files across folders, and searches across title, artist, and album. It does not follow symbolic links or Windows reparse points. Multiple scan folders can be added, removed, or rescanned at any time via the Settings modal.
 
 The scanner accepts `.mp3`, `.flac`, `.wav`, `.ogg`, `.oga`, `.m4a`, `.mp4`, `.aac`, `.aif` and `.aiff`. Extensions are not a guarantee of codec support. Playback uses Rodio's enabled decoders, including the additional ALAC and AIFF features. Files with unreadable metadata can fall back to a filename title if audio decoding succeeds.
 
-Controls include play/pause, previous/next, seeking, volume, shuffle and repeat-all. Playlists and favourites store local file paths, not copies of the audio. Moving a file breaks its saved reference; rescanning does not relocate it automatically. Playback position, queue, volume and shuffle state are not saved across restarts.
+Controls include play/pause, previous/next, seeking with configurable intervals (5s, 10s, 15s, 30s), volume, shuffle, repeat-all, and a **5-band graphic equalizer**. Playlists and favourites store local file paths, not copies of the audio. Moving a file breaks its saved reference; rescanning does not relocate it automatically. Playback position, queue, volume and shuffle state are not saved across restarts.
+
+### Equalizer and audio DSP
+
+- **Bands**: 60 Hz (Sub-Bass), 230 Hz (Bass), 910 Hz (Midrange), 3.6 kHz (Presence), and 14 kHz (Brilliance) with continuous ±12 dB gain adjustment.
+- **Presets**: Flat, Bass Boost, Treble Boost, Vocal Boost, Rock, and Electronic.
+- **Access**: Press `Ctrl+E` (`Cmd+E` on macOS) or click the Equalizer button in the player bar.
+
+## Themes and interface
+
+Noir Player provides two handcrafted themes:
+- **Dark Theme**: Deep black surfaces (`#0A0A0A` / `#161616`) with an atmospheric red aura top wash, crimson borders, and glowing red play accents.
+- **Light Theme**: Crisp white cards (`#FFFFFF`), subtle silver borders (`#E5E5E5`), clean neutral backgrounds (`#FAFAFA`), `#1A1A1A` charcoal typography, and vibrant red accents (`#D32F2F`), matching the mobile NoirPlayer design.
+
+Switch themes anytime via the theme toggle in the window header or inside **Settings** (`Ctrl+,`). Modals feature smooth entrance animations and backdrop scroll containment preventing background library items from scrolling while a dialog is active.
+
+### Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+,` / `Cmd+,` | Open / close Settings & Preferences |
+| `Ctrl+E` / `Cmd+E` | Open / close 5-Band Graphic Equalizer |
+| `Escape` | Dismiss open dialogs, settings, or equalizer |
+| `Space` | Play / Pause current track |
 
 ## Discover and API configuration
 
@@ -36,7 +59,7 @@ For development, copy `.env.example` to `.env` in the repository root and fill i
 
 Do not commit `.env`, attach it to bug reports, put keys in Cargo metadata, or add them as build secrets. Before copying the template, ensure `.env` is excluded from version control. The workflows reject a tracked root `.env` without reading it. Release archives contain no environment file.
 
-Discover Play downloads and validates the complete audio file into a local cache before playback. It is not streaming. Download saves audio to the system Music folder and writes the discovered title and artist into its tags. A prepared cached copy can be reused. The first YouTube result can be the wrong recording; neither matching nor service availability is guaranteed. Only download audio you are permitted to download and follow the providers' terms.
+Discover Play downloads and validates the complete audio file into a local cache before playback. It is not streaming. Download saves audio to the configured download folder (defaults to the system Music folder, or customizable in Settings) and writes the discovered title and artist into its tags. A prepared cached copy can be reused. The first YouTube result can be the wrong recording; neither matching nor service availability is guaranteed. Only download audio you are permitted to download and follow the providers' terms.
 
 ### Quotas and service failures
 
@@ -50,11 +73,11 @@ Missing keys, rejected requests, exhausted quota and malformed responses are sho
 
 | Data | Windows | macOS | Linux |
 | --- | --- | --- | --- |
-| Playlists and favourites | `%LOCALAPPDATA%\noir-player\playlists.json` | `~/Library/Application Support/noir-player/playlists.json` | `$XDG_DATA_HOME/noir-player/playlists.json`, default `~/.local/share/noir-player/playlists.json` |
+| Playlists, favourites & settings | `%LOCALAPPDATA%\noir-player\playlists.json` | `~/Library/Application Support/noir-player/playlists.json` | `$XDG_DATA_HOME/noir-player/playlists.json`, default `~/.local/share/noir-player/playlists.json` |
 | Prepared Discover audio | `%LOCALAPPDATA%\noir-player\discover` | `~/Library/Caches/noir-player/discover` | `$XDG_CACHE_HOME/noir-player/discover`, default `~/.cache/noir-player/discover` |
-| Downloads and scanned library | System Music folder | System Music folder | System Music folder from user-directory configuration |
+| Downloads and scanned library | System Music folder & user-configured scan paths | System Music folder & user-configured scan paths | System Music folder & user-configured scan paths |
 
-Paths are resolved through `dirs`. Prepared audio is removed when its in-memory owner is dropped; an interrupted process can leave cache or temporary files behind. Downloads explicitly kept by the app remain in Music. A missing or malformed playlist store produces an error rather than overwriting the existing data. There is no cloud sync.
+Paths are resolved through `dirs`. Prepared audio is removed when its in-memory owner is dropped; an interrupted process can leave cache or temporary files behind. Downloads explicitly kept by the app remain in the configured download folder. A missing or malformed playlist store produces an error rather than overwriting the existing data. There is no cloud sync.
 
 ## Development
 
@@ -123,7 +146,7 @@ Build and packaging decisions are based on:
 
 ## Packaging and releases
 
-The current workflow produces the following assets, where `VERSION` is the version in `Cargo.toml`. Windows installers are an Unreleased change; this does not change the historical 1.1.3 ZIP release notes.
+The current workflow produces the following assets, where `VERSION` is the version in `Cargo.toml`. Starting with version 1.2.0, Windows distribution includes official WiX MSI and NSIS setup installers.
 
 | Target | Runner | Artifact |
 | --- | --- | --- |
@@ -135,7 +158,7 @@ These are configured targets, not claims of successful builds or runtime tests. 
 
 CI checks formatting, typechecking, build, tests and Clippy on all three platforms. Windows also checks the `installer` feature and runs Clippy with `-D warnings`, builds the release application, generates both installers, validates exactly one nonempty MSI and NSIS EXE, and uploads `ci-windows-x64-installers` for 14 days. Branch pushes, pull requests and manual CI dispatch exercise generation without a release tag; they do not install or launch the application.
 
-Release runs on `v*` tags and manual dispatch. Dispatch must select an existing tag matching the version in `Cargo.toml`. Manual dispatch builds artifacts by default; enable `create_draft` to request a draft release. Before the next release, bump the version and move the relevant Unreleased notes into its version-scoped section; do not rewrite or retag 1.1.3.
+Release runs on `v*` tags and manual dispatch. Dispatch must select an existing tag matching the version in `Cargo.toml`. Manual dispatch builds artifacts by default; enable `create_draft` to request a draft release. Release notes for each version are scoped in `CHANGELOG.md`.
 
 The release workflow calls the separate CI workflow at the same revision before packaging. Every platform must pass. The release caller skips CI's extra Windows release build and installer generation because its packaging job performs them, but retains installer feature checks. Windows packaging reuses the built application and normalizes the MSI and NSIS filenames listed above. Artifacts and SHA256 sidecars are uploaded first and retained for 14 days. The draft job requires all six package assets and their sidecars, verifies each checksum, combines them into `SHA256SUMS`, and extracts only that version's section from `CHANGELOG.md`. Draft release uploads include the packages, sidecars and `SHA256SUMS`.
 

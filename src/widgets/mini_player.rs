@@ -29,10 +29,16 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
         )
         .child(
             h_flex()
+                .id("mini-player-body")
                 .items_center()
                 .gap(px(12.0))
                 .px(px(10.0))
                 .py(px(8.0))
+                .cursor_pointer()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.active_tab = crate::app::ActiveTab::Player;
+                    cx.notify();
+                }))
                 .child(artwork_small(artwork))
                 .child(
                     v_flex()

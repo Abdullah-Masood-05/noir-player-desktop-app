@@ -59,6 +59,9 @@ pub fn render_settings_modal(
             .flex()
             .items_center()
             .justify_center()
+            .on_scroll_wheel(|_, _, cx| {
+                cx.stop_propagation();
+            })
             .on_click(cx.listener(|this, _, _, cx| {
                 this.close_settings(cx);
             }))
@@ -97,6 +100,9 @@ pub fn render_settings_modal(
                         )
                         .blur_radius(px(48.0))])
                         .overflow_hidden()
+                        .on_scroll_wheel(|_, _, cx| {
+                            cx.stop_propagation();
+                        })
                         .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                             let k = event.keystroke.key.trim();
                             let ctrl_or_cmd =

@@ -44,7 +44,11 @@ pub fn modal_transition(id: impl Into<ElementId>, content: impl IntoElement) -> 
 
 pub fn backdrop_transition(id: impl Into<ElementId>, content: impl IntoElement) -> AnyElement {
     div()
-        .size_full()
+        .absolute()
+        .inset_0()
+        .on_scroll_wheel(|_, _, cx| {
+            cx.stop_propagation();
+        })
         .child(content)
         .with_animation(
             id,

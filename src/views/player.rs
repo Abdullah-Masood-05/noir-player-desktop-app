@@ -4,7 +4,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
-use crate::views::library::app_bar;
 use crate::views::ui::{bg_color, icon_text, img_from_bytes, red, red_a, white};
 
 pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
@@ -23,6 +22,9 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
     let shuffle = model.shuffle;
     let repeat_all = model.repeat_all;
     let has_track = model.current.is_some();
+
+    let seek_interval = model.store.seek_interval_seconds;
+    let eq_enabled = model.store.equalizer_enabled;
 
     v_flex()
         .size_full()
@@ -44,7 +46,7 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
             v_flex()
                 .size_full()
                 .relative()
-                .child(app_bar("Now Playing"))
+                .child(player_header(cx, eq_enabled))
                 .child(
                     v_flex()
                         .flex_1()
@@ -114,7 +116,7 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                 .w_full()
                                 .items_center()
                                 .justify_between()
-                                .px(px(6.0))
+                                .px(px(4.0))
                                 .child(
                                     div()
                                         .id("shuffle")
@@ -124,13 +126,14 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                             this.shuffle = !this.shuffle;
                                             cx.notify();
                                         }))
-                                        .child(icon_text(MusicIcon::Shuffle, 22.0)),
+                                        .child(icon_text(MusicIcon::Shuffle, 20.0)),
                                 )
                                 .child(prev_btn(cx))
+                                .child(skip_back_btn(seek_interval, cx))
                                 .child(
                                     div()
                                         .id("play-pause")
-                                        .size(px(76.0))
+                                        .size(px(72.0))
                                         .rounded_full()
                                         .bg(red())
                                         .flex()
@@ -152,9 +155,10 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                             } else {
                                                 MusicIcon::Play
                                             },
-                                            36.0,
+                                            34.0,
                                         )),
                                 )
+                                .child(skip_fwd_btn(seek_interval, cx))
                                 .child(next_btn(cx))
                                 .child(
                                     div()
@@ -165,17 +169,127 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                             this.repeat_all = !this.repeat_all;
                                             cx.notify();
                                         }))
-                                        .child(icon_text(MusicIcon::Repeat, 22.0)),
+                                        .child(icon_text(MusicIcon::Repeat, 20.0)),
                                 ),
                         ),
                 ),
         )
 }
 
+fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool) -> Div {
+    h_flex()
+        .w_full()
+        .h(px(56.0))
+        .px(px(16.0))
+        .items_center()
+        .justify_between()
+        .flex_shrink_0()
+        .child(
+            div()
+                .size(px(36.0))
+                .flex()
+                .items_center()
+                .justify_center(),
+        )
+        .child(
+            div()
+                .text_center()
+                .text_lg()
+                .font_weight(FontWeight::BOLD)
+                .text_color(white(1.0))
+                .child("Now Playing"),
+        )
+        .child(
+            h_flex()
+                .items_center()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .id("player-eq-btn")
+                        .size(px(36.0))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(if eq_enabled { red() } else { white(0.7) })
+                        .cursor_pointer()
+                        .hover(|s| s.bg(white(0.08)).text_color(white(1.0)))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_settings(crate::views::settings::SettingsCategory::Equalizer, cx);
+                        }))
+                        .child(icon_text(MusicIcon::SlidersHorizontal, 20.0)),
+                )
+                .child(
+                    div()
+                        .id("player-settings-btn")
+                        .size(px(36.0))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(white(0.7))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(white(0.08)).text_color(white(1.0)))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_settings(crate::views::settings::SettingsCategory::All, cx);
+                        }))
+                        .child(icon_text(MusicIcon::Settings, 20.0)),
+                ),
+        )
+}
+
+fn skip_back_btn(interval: u32, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+    div()
+        .id("skip-back")
+        .size(px(40.0))
+        .rounded_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .text_color(white(0.85))
+        .cursor_pointer()
+        .hover(|s| s.bg(white(0.06)).text_color(white(1.0)))
+        .on_click(cx.listener(|this, _, _, cx| this.skip_backward(cx)))
+        .child(icon_text(MusicIcon::RotateCcw, 18.0))
+        .child(
+            div()
+                .text_size(px(9.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(white(0.7))
+                .mt(px(-2.0))
+                .child(format!("{interval}s")),
+        )
+}
+
+fn skip_fwd_btn(interval: u32, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+    div()
+        .id("skip-forward")
+        .size(px(40.0))
+        .rounded_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .text_color(white(0.85))
+        .cursor_pointer()
+        .hover(|s| s.bg(white(0.06)).text_color(white(1.0)))
+        .on_click(cx.listener(|this, _, _, cx| this.skip_forward(cx)))
+        .child(icon_text(MusicIcon::RotateCw, 18.0))
+        .child(
+            div()
+                .text_size(px(9.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(white(0.7))
+                .mt(px(-2.0))
+                .child(format!("{interval}s")),
+        )
+}
+
 fn prev_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
     div()
         .id("prev")
-        .size(px(44.0))
+        .size(px(40.0))
         .rounded_full()
         .flex()
         .items_center()
@@ -184,13 +298,13 @@ fn prev_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
         .cursor_pointer()
         .hover(|s| s.bg(white(0.06)))
         .on_click(cx.listener(|this, _, _, cx| this.prev(cx)))
-        .child(icon_text(MusicIcon::SkipBack, 24.0))
+        .child(icon_text(MusicIcon::SkipBack, 22.0))
 }
 
 fn next_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
     div()
         .id("next")
-        .size(px(44.0))
+        .size(px(40.0))
         .rounded_full()
         .flex()
         .items_center()
@@ -199,7 +313,7 @@ fn next_btn(cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
         .cursor_pointer()
         .hover(|s| s.bg(white(0.06)))
         .on_click(cx.listener(|this, _, _, cx| this.next(cx)))
-        .child(icon_text(MusicIcon::SkipForward, 24.0))
+        .child(icon_text(MusicIcon::SkipForward, 22.0))
 }
 
 fn artwork_large(artwork: Option<std::sync::Arc<[u8]>>, is_playing: bool) -> Div {

@@ -96,6 +96,10 @@ pub struct NoirPlayerModel {
     discover_audio_job: Option<DiscoverAudioJob>,
     discover_cached: Vec<media::PreparedAudio>,
     discover_downloads: Vec<Track>,
+    pub settings_open: bool,
+    pub settings_category: crate::views::settings::SettingsCategory,
+    pub settings_search: Entity<InputState>,
+    pub settings_selected_index: usize,
     _subscriptions: Vec<Subscription>,
     dialog_subscription: Option<Subscription>,
 }
@@ -121,6 +125,8 @@ impl NoirPlayerModel {
             cx.new(|cx| InputState::new(window, cx).placeholder("Search title, artist or album"));
         let discover_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Search tracks (Enter)"));
+        let settings_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Select an option..."));
         let subscriptions = vec![
             cx.subscribe(&library_search, |_, _, _: &InputEvent, cx| cx.notify()),
             cx.subscribe(&discover_search, |this, input, event: &InputEvent, cx| {
@@ -128,7 +134,12 @@ impl NoirPlayerModel {
                     this.load_discover(input.read(cx).value().to_string(), cx);
                 }
             }),
+            cx.subscribe(&settings_search, |_, _, _: &InputEvent, cx| cx.notify()),
         ];
+        if let Some(player) = player.as_ref() {
+            player.set_equalizer_enabled(store.equalizer_enabled);
+            player.set_equalizer_gains(store.equalizer_gains);
+        }
         cx.spawn(async move |this, cx| loop {
             smol::Timer::after(Duration::from_millis(250)).await;
             if this.update(cx, |this, cx| this.tick(cx)).is_err() {
@@ -169,6 +180,10 @@ impl NoirPlayerModel {
             discover_audio_job: None,
             discover_cached: Vec::new(),
             discover_downloads: Vec::new(),
+            settings_open: false,
+            settings_category: crate::views::settings::SettingsCategory::All,
+            settings_search,
+            settings_selected_index: 0,
             _subscriptions: subscriptions,
             dialog_subscription: None,
         };
@@ -503,6 +518,48 @@ impl NoirPlayerModel {
                 cx.notify();
                 false
             }
+        }
+    }
+
+    pub fn save_current_store(&mut self, cx: &mut Context<Self>) -> bool {
+        let store = self.store.clone();
+        self.save_store(store, cx)
+    }
+
+    pub fn open_settings(
+        &mut self,
+        category: crate::views::settings::SettingsCategory,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_open = true;
+        self.settings_category = category;
+        self.settings_selected_index = 0;
+        cx.notify();
+    }
+
+    pub fn close_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_open = false;
+        cx.notify();
+    }
+
+    pub fn toggle_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_open = !self.settings_open;
+        cx.notify();
+    }
+
+    pub fn skip_forward(&mut self, cx: &mut Context<Self>) {
+        if let Some(player) = self.player.as_ref() {
+            let offset = Duration::from_secs(self.store.seek_interval_seconds as u64);
+            let _ = player.skip_forward(offset);
+            cx.notify();
+        }
+    }
+
+    pub fn skip_backward(&mut self, cx: &mut Context<Self>) {
+        if let Some(player) = self.player.as_ref() {
+            let offset = Duration::from_secs(self.store.seek_interval_seconds as u64);
+            let _ = player.skip_backward(offset);
+            cx.notify();
         }
     }
 
@@ -880,12 +937,20 @@ impl Render for NoirPlayerModel {
         let has_track = self.now_playing().is_some();
         let dialog_layer = Root::render_dialog_layer(window, cx);
         v_flex()
+            .id("app-root")
             .size_full()
             .min_h_0()
             .overflow_hidden()
             .relative()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
+            .when(self.settings_open, |d| {
+                d.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                    if event.keystroke.key == "escape" || event.keystroke.key == "Escape" {
+                        this.close_settings(cx);
+                    }
+                }))
+            })
             .child(
                 v_flex()
                     .flex_1()
@@ -940,7 +1005,10 @@ impl Render for NoirPlayerModel {
             .when(has_track && active_tab != ActiveTab::Player, |d| {
                 d.child(mini_player::mini_player(self, cx))
             })
-            .child(nav::bottom_nav(active_tab, cx))
+            .child(nav::bottom_nav(active_tab, self.settings_open, cx))
             .children(dialog_layer)
+            .when(self.settings_open, |d| {
+                d.child(crate::views::settings::render_settings_modal(self, cx))
+            })
     }
 }

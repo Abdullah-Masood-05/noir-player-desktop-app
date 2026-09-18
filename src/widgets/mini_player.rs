@@ -5,7 +5,12 @@ use gpui_kit::*;
 use crate::app::NoirPlayerModel;
 use crate::views::ui::{icon_text, img_from_bytes, red, red_a, surface, white};
 
+fn c(hex: u32) -> Hsla {
+    rgb(hex).into()
+}
+
 pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let Some(track) = model.now_playing() else {
         return div();
     };
@@ -18,7 +23,17 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
     v_flex()
         .w_full()
         .flex_shrink_0()
-        .bg(surface())
+        .bg(if is_light {
+            c(0xFFFFFF)
+        } else {
+            surface()
+        })
+        .border_t(px(1.0))
+        .border_color(if is_light {
+            c(0xE4E4E7)
+        } else {
+            c(0x282828)
+        })
         .child(
             div()
                 .w_full()
@@ -50,6 +65,11 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(if is_light {
+                                    rgb(0x18181B).into()
+                                } else {
+                                    white(1.0)
+                                })
                                 .overflow_hidden()
                                 .text_ellipsis()
                                 .child(title),
@@ -57,7 +77,11 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(white(0.55))
+                                .text_color(if is_light {
+                                    rgb(0x71717A).into()
+                                } else {
+                                    white(0.55)
+                                })
                                 .overflow_hidden()
                                 .text_ellipsis()
                                 .child(artist),
@@ -72,7 +96,18 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
                         .items_center()
                         .justify_center()
                         .cursor_pointer()
-                        .hover(|s| s.bg(white(0.06)))
+                        .text_color(if is_light {
+                            c(0x18181B)
+                        } else {
+                            white(1.0)
+                        })
+                        .hover(move |s| {
+                            if is_light {
+                                s.bg(c(0xF0F1F3))
+                            } else {
+                                s.bg(white(0.06))
+                            }
+                        })
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.toggle_play(cx);
                         }))
@@ -94,7 +129,18 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
                         .items_center()
                         .justify_center()
                         .cursor_pointer()
-                        .hover(|s| s.bg(white(0.06)))
+                        .text_color(if is_light {
+                            c(0x18181B)
+                        } else {
+                            white(1.0)
+                        })
+                        .hover(move |s| {
+                            if is_light {
+                                s.bg(c(0xF0F1F3))
+                            } else {
+                                s.bg(white(0.06))
+                            }
+                        })
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.next(cx);
                         }))

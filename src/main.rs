@@ -7,12 +7,8 @@ mod media;
 mod views;
 mod widgets;
 
-use gpui_kit::component::{Root, Theme, ThemeMode};
+use gpui_kit::component::Root;
 use gpui_kit::*;
-
-fn noir(hex: u32) -> Hsla {
-    rgb(hex).into()
-}
 
 fn native_window_options() -> WindowOptions {
     let mut options = WindowOptions {
@@ -38,19 +34,11 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx);
 
-            // Noir dark theme with the brand red as primary.
-            Theme::change(ThemeMode::Dark, None, cx);
-            let theme = Theme::global_mut(cx);
-            theme.primary = noir(0xE53935);
-            theme.primary_foreground = noir(0xFFFFFF);
-            theme.background = noir(0x121212);
-            theme.foreground = noir(0xFFFFFF);
-            theme.popover = noir(0x1E1E1E);
-            theme.secondary = noir(0x1E1E1E);
-            theme.muted = noir(0x1E1E1E);
-            theme.muted_foreground = noir(0xFFFFFF).alpha(0.55);
-            theme.border = noir(0x2A2A2A);
-            Theme::sync_base(cx);
+            let store = app::store::Store::default_path()
+                .ok()
+                .and_then(|p| app::store::Store::load(&p).ok())
+                .unwrap_or_default();
+            views::ui::apply_theme(&store.theme_mode, cx);
 
             cx.spawn(async move |cx| {
                 cx.open_window(native_window_options(), |window, cx| {

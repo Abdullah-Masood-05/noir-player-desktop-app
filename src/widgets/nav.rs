@@ -6,6 +6,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let items = vec![
         (ActiveTab::Library, "Library", MusicIcon::LibraryBig),
         (ActiveTab::Player, "Player", MusicIcon::Music4),
@@ -13,13 +14,23 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
         (ActiveTab::Discover, "Discover", MusicIcon::Compass),
     ];
 
+    let unselected_color = if is_light {
+        rgb(0x71717A).into()
+    } else {
+        white(0.5)
+    };
+
     let mut nav = h_flex()
         .w_full()
         .h(px(66.0))
         .flex_shrink_0()
         .items_center()
         .justify_around()
-        .bg(nav_bg())
+        .bg(if is_light {
+            rgb(0xFFFFFF).into()
+        } else {
+            nav_bg()
+        })
         .border_t_1()
         .border_color(cx.theme().border);
 
@@ -58,7 +69,7 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
                         .child(icon_text(icon, 28.0).text_color(if sel {
                             white(1.0)
                         } else {
-                            white(0.5)
+                            unselected_color
                         })),
                 ))
                 .child(
@@ -67,7 +78,7 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
                         .when(sel, |d| {
                             d.text_color(red()).font_weight(FontWeight::SEMIBOLD)
                         })
-                        .when(!sel, |d| d.text_color(white(0.5)))
+                        .when(!sel, |d| d.text_color(unselected_color))
                         .child(label.to_string()),
                 ),
         );
@@ -98,7 +109,7 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
                     .child(icon_text(MusicIcon::Settings, 28.0).text_color(if settings_open {
                         white(1.0)
                     } else {
-                        white(0.5)
+                        unselected_color
                     })),
             ))
             .child(
@@ -107,7 +118,7 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
                     .when(settings_open, |d| {
                         d.text_color(red()).font_weight(FontWeight::SEMIBOLD)
                     })
-                    .when(!settings_open, |d| d.text_color(white(0.5)))
+                    .when(!settings_open, |d| d.text_color(unselected_color))
                     .child("Settings"),
             ),
     )

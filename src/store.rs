@@ -26,6 +26,10 @@ pub struct Store {
     pub theme_mode: String,
     #[serde(default)]
     pub music_folder: Option<PathBuf>,
+    #[serde(default)]
+    pub music_folders: Vec<PathBuf>,
+    #[serde(default)]
+    pub download_folder: Option<PathBuf>,
     #[serde(default = "default_resume_last_song")]
     pub resume_last_song: bool,
 }
@@ -61,8 +65,22 @@ impl Default for Store {
             equalizer_preset: "Flat".to_string(),
             theme_mode: "dark".to_string(),
             music_folder: None,
+            music_folders: Vec::new(),
+            download_folder: None,
             resume_last_song: true,
         }
+    }
+}
+
+impl Store {
+    pub fn all_music_folders(&self) -> Vec<PathBuf> {
+        let mut list = self.music_folders.clone();
+        if let Some(f) = self.music_folder.as_ref() {
+            if !list.contains(f) {
+                list.insert(0, f.clone());
+            }
+        }
+        list
     }
 }
 
@@ -357,5 +375,15 @@ mod tests {
         assert!(reloaded.equalizer_enabled);
         assert_eq!(reloaded.equalizer_gains, [6.0, 4.0, 1.0, 0.0, 0.0]);
         assert_eq!(reloaded.equalizer_preset, "Bass Boost");
+
+        // Test music_folders and download_folder persistence
+        custom.music_folders = vec![PathBuf::from("/music/folder1"), PathBuf::from("/music/folder2")];
+        custom.download_folder = Some(PathBuf::from("/music/downloads"));
+        custom.save(&path).unwrap();
+
+        let reloaded_folders = Store::load(&path).unwrap();
+        assert_eq!(reloaded_folders.music_folders.len(), 2);
+        assert_eq!(reloaded_folders.download_folder, Some(PathBuf::from("/music/downloads")));
+        assert_eq!(reloaded_folders.all_music_folders().len(), 2);
     }
 }

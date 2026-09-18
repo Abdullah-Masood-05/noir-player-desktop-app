@@ -156,6 +156,7 @@ pub fn prepare_discover_audio(
     source: &crate::api::Track,
     download: bool,
     cached: Option<&Path>,
+    download_folder: Option<&Path>,
     cancel: &std::sync::atomic::AtomicBool,
     progress: &impl Fn(&str),
 ) -> Result<PreparedAudio> {
@@ -166,8 +167,10 @@ pub fn prepare_discover_audio(
 
     crate::api::check_cancel(cancel)?;
     let folder = if download {
-        default_music_folder()
-            .ok_or_else(|| anyhow!("Could not locate the system Music folder."))?
+        download_folder
+            .map(Path::to_path_buf)
+            .or_else(default_music_folder)
+            .ok_or_else(|| anyhow!("Could not locate the download music folder."))?
     } else {
         dirs::cache_dir()
             .ok_or_else(|| anyhow!("Could not locate the audio cache folder."))?
@@ -349,6 +352,31 @@ pub fn scan_folder(folder: &Path) -> ScanResult {
         )
     });
     result.errors.sort();
+    result
+}
+
+pub fn scan_folders(folders: &[PathBuf]) -> ScanResult {
+    let mut result = ScanResult::default();
+    let mut seen = std::collections::HashSet::new();
+    for folder in folders {
+        let sub = scan_folder(folder);
+        result.errors.extend(sub.errors);
+        for track in sub.tracks {
+            if seen.insert(track.path.clone()) {
+                result.tracks.push(track);
+            }
+        }
+    }
+    result.tracks.sort_by_cached_key(|track| {
+        (
+            track.title.to_lowercase(),
+            track.artist.to_lowercase(),
+            track.album.to_lowercase(),
+            track.path.clone(),
+        )
+    });
+    result.errors.sort();
+    result.errors.dedup();
     result
 }
 
@@ -1230,5 +1258,19 @@ mod tests {
                 assert!((-12.0..=12.0).contains(&g), "Preset {name} gain out of bounds: {g}");
             }
         }
+    }
+
+    #[test]
+    fn multi_folder_scan_aggregates_and_deduplicates() {
+        let temp1 = TempDir::new();
+        let temp2 = TempDir::new();
+        let path1 = temp1.0.join("track1.wav");
+        let path2 = temp2.0.join("track2.wav");
+        write_wav(&path1);
+        write_wav(&path2);
+
+        let res = scan_folders(&[temp1.0.clone(), temp2.0.clone(), temp1.0.clone()]);
+        assert_eq!(res.tracks.len(), 2);
+        assert!(res.errors.is_empty());
     }
 }

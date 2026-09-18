@@ -134,15 +134,27 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                 .w_full()
                                 .items_center()
                                 .justify_center()
-                                .gap(px(14.0))
+                                .gap(px(24.0))
                                 .child(
                                     div()
                                         .id("shuffle")
+                                        .size(px(40.0))
+                                        .rounded_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
                                         .cursor_pointer()
                                         .text_color(if shuffle {
                                             red()
                                         } else {
                                             dynamic_subtitle(is_light)
+                                        })
+                                        .hover(move |s| {
+                                            s.bg(dynamic_hover(is_light)).text_color(if shuffle {
+                                                red()
+                                            } else {
+                                                dynamic_text(is_light)
+                                            })
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.shuffle = !this.shuffle;
@@ -185,11 +197,23 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                 .child(
                                     div()
                                         .id("repeat")
+                                        .size(px(40.0))
+                                        .rounded_full()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
                                         .cursor_pointer()
                                         .text_color(if repeat_all {
                                             red()
                                         } else {
                                             dynamic_subtitle(is_light)
+                                        })
+                                        .hover(move |s| {
+                                            s.bg(dynamic_hover(is_light)).text_color(if repeat_all {
+                                                red()
+                                            } else {
+                                                dynamic_text(is_light)
+                                            })
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.repeat_all = !this.repeat_all;

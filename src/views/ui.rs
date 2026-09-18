@@ -107,12 +107,12 @@ pub fn dynamic_hover(is_light: bool) -> Hsla {
 }
 
 /// Red top wash: rich vibrant crimson in dark mode (matching the classic Noir design),
-/// and a soft transparent crimson wash in light mode.
+/// and a warmer, more vibrant crimson wash in light mode.
 pub fn top_fade(is_light: bool) -> Div {
     let (start_color, end_color, height) = if is_light {
-        (red_a(0.12), rgb(LIGHT_BG).alpha(0.0).into(), 130.0)
+        (red_a(0.22), rgb(LIGHT_BG).alpha(0.0).into(), 155.0)
     } else {
-        (red_a(0.24), bg_color(), 160.0)
+        (red_a(0.25), bg_color(), 160.0)
     };
     div()
         .absolute()

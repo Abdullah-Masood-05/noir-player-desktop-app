@@ -42,7 +42,7 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                 .h(px(300.0))
                 .bg(linear_gradient(
                     180.0,
-                    linear_color_stop(red_a(if is_light { 0.20 } else { 0.28 }), 0.0),
+                    linear_color_stop(red_a(if is_light { 0.24 } else { 0.28 }), 0.0),
                     linear_color_stop(dynamic_bg(is_light).alpha(0.0), 1.0),
                 )),
         )

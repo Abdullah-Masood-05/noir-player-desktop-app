@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use crate::media::Track;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Store {
     #[serde(default)]
     pub playlists: Vec<SavedPlaylist>,
@@ -85,7 +84,6 @@ impl Store {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct SavedPlaylist {
     pub name: String,
     pub paths: Vec<PathBuf>,
@@ -385,5 +383,17 @@ mod tests {
         assert_eq!(reloaded_folders.music_folders.len(), 2);
         assert_eq!(reloaded_folders.download_folder, Some(PathBuf::from("/music/downloads")));
         assert_eq!(reloaded_folders.all_music_folders().len(), 2);
+    }
+
+    #[test]
+    fn unknown_fields_in_json_are_gracefully_ignored() {
+        let json = r#"{
+            "playlists": [],
+            "favourites": [],
+            "unknown_future_field": "some_value",
+            "another_field": 12345
+        }"#;
+        let loaded: Result<Store, _> = serde_json::from_str(json);
+        assert!(loaded.is_ok(), "Unknown fields should be tolerated for schema evolution");
     }
 }

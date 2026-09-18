@@ -40,10 +40,10 @@ pub fn render_equalizer_modal(
                 let k = event.keystroke.key.trim();
                 let ctrl_or_cmd =
                     event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
-                if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                    cx.stop_propagation();
-                    this.close_equalizer(cx);
-                } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
+                if k.eq_ignore_ascii_case("escape")
+                    || k.eq_ignore_ascii_case("esc")
+                    || (ctrl_or_cmd && k.eq_ignore_ascii_case("e"))
+                {
                     cx.stop_propagation();
                     this.close_equalizer(cx);
                 } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
@@ -52,54 +52,55 @@ pub fn render_equalizer_modal(
                     this.open_settings(crate::views::settings::SettingsCategory::Equalizer, cx);
                 }
             }))
-            .child(
-                modal_transition(
-                    "equalizer-modal-anim",
-                    v_flex()
-                        .id("equalizer-modal")
-                        .track_focus(&model.equalizer_focus_handle)
-                        .w(px(660.0))
-                        .rounded_2xl()
-                        .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
-                        .border(px(1.0))
-                        .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
-                        .shadow(vec![BoxShadow::new(
-                            px(0.0),
-                            px(24.0),
-                            if is_light { c(0x00000033) } else { c(0x000000) },
-                        )
-                        .blur_radius(px(48.0))])
-                        .overflow_hidden()
-                        .on_scroll_wheel(|_, _, cx| {
+            .child(modal_transition(
+                "equalizer-modal-anim",
+                v_flex()
+                    .id("equalizer-modal")
+                    .track_focus(&model.equalizer_focus_handle)
+                    .w(px(660.0))
+                    .rounded_2xl()
+                    .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
+                    .border(px(1.0))
+                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
+                    .shadow(vec![BoxShadow::new(
+                        px(0.0),
+                        px(24.0),
+                        if is_light { c(0x00000033) } else { c(0x000000) },
+                    )
+                    .blur_radius(px(48.0))])
+                    .overflow_hidden()
+                    .on_scroll_wheel(|_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        let k = event.keystroke.key.trim();
+                        let ctrl_or_cmd =
+                            event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+                        if k.eq_ignore_ascii_case("escape")
+                            || k.eq_ignore_ascii_case("esc")
+                            || (ctrl_or_cmd && k.eq_ignore_ascii_case("e"))
+                        {
                             cx.stop_propagation();
-                        })
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                            let k = event.keystroke.key.trim();
-                            let ctrl_or_cmd =
-                                event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
-                            if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                                cx.stop_propagation();
-                                this.close_equalizer(cx);
-                            } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
-                                cx.stop_propagation();
-                                this.close_equalizer(cx);
-                            } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
-                                cx.stop_propagation();
-                                this.close_equalizer(cx);
-                                this.open_settings(crate::views::settings::SettingsCategory::Equalizer, cx);
-                            }
-                        }))
-                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_equalizer(cx);
+                        } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
                             cx.stop_propagation();
-                            window.focus(&this.equalizer_focus_handle, cx);
-                        }))
-                        .child(modal_header(is_light, cx))
-                        .child(master_toggle_section(eq_enabled, is_light, cx))
-                        .child(presets_section(&active_preset, is_light, cx))
-                        .child(bands_section(gains, eq_enabled, is_light, cx))
-                        .child(modal_footer(is_light)),
-                ),
-            ),
+                            this.close_equalizer(cx);
+                            this.open_settings(
+                                crate::views::settings::SettingsCategory::Equalizer,
+                                cx,
+                            );
+                        }
+                    }))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        window.focus(&this.equalizer_focus_handle, cx);
+                    }))
+                    .child(modal_header(is_light, cx))
+                    .child(master_toggle_section(eq_enabled, is_light, cx))
+                    .child(presets_section(&active_preset, is_light, cx))
+                    .child(bands_section(gains, eq_enabled, is_light, cx))
+                    .child(modal_footer(is_light)),
+            )),
     )
 }
 
@@ -214,9 +215,19 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
                     div()
                         .size(px(10.0))
                         .rounded_full()
-                        .bg(if enabled { red() } else { if is_light { c(0x9CA3AF) } else { c(0x444752) } })
+                        .bg(if enabled {
+                            red()
+                        } else {
+                            if is_light {
+                                c(0x9CA3AF)
+                            } else {
+                                c(0x444752)
+                            }
+                        })
                         .when(enabled, |d| {
-                            d.shadow(vec![BoxShadow::new(px(0.0), px(0.0), red()).blur_radius(px(6.0))])
+                            d.shadow(vec![
+                                BoxShadow::new(px(0.0), px(0.0), red()).blur_radius(px(6.0))
+                            ])
                         }),
                 )
                 .child(
@@ -227,7 +238,11 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
                                 .text_sm()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(if is_light {
-                                    if enabled { c(0x18181B) } else { c(0x71717A) }
+                                    if enabled {
+                                        c(0x18181B)
+                                    } else {
+                                        c(0x71717A)
+                                    }
                                 } else if enabled {
                                     white(0.95)
                                 } else {
@@ -253,7 +268,15 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
                 .w(px(50.0))
                 .h(px(26.0))
                 .rounded_full()
-                .bg(if enabled { red() } else { if is_light { c(0xD1D5DB) } else { c(0x2C2E38) } })
+                .bg(if enabled {
+                    red()
+                } else {
+                    if is_light {
+                        c(0xD1D5DB)
+                    } else {
+                        c(0x2C2E38)
+                    }
+                })
                 .p(px(2.0))
                 .flex()
                 .items_center()
@@ -273,7 +296,7 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
                         .rounded_full()
                         .bg(white(1.0))
                         .shadow(vec![
-                            BoxShadow::new(px(0.0), px(1.0), c(0x000000)).blur_radius(px(3.0)),
+                            BoxShadow::new(px(0.0), px(1.0), c(0x000000)).blur_radius(px(3.0))
                         ])
                         .when(enabled, |d| d.ml_auto())
                         .flex()
@@ -328,7 +351,11 @@ fn presets_section(current: &str, is_light: bool, cx: &mut Context<NoirPlayerMod
                         .py(px(5.0))
                         .rounded_lg()
                         .text_xs()
-                        .font_weight(if active { FontWeight::BOLD } else { FontWeight::NORMAL })
+                        .font_weight(if active {
+                            FontWeight::BOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
                         .bg(if active {
                             red()
                         } else if is_light {
@@ -426,11 +453,7 @@ fn bands_section(
                         .gap(px(6.0))
                         .p(px(10.0))
                         .rounded_xl()
-                        .bg(if is_light {
-                            c(0xF9FAFB)
-                        } else {
-                            c(0x16181F)
-                        })
+                        .bg(if is_light { c(0xF9FAFB) } else { c(0x16181F) })
                         .border(px(1.0))
                         .border_color(if is_active {
                             red().alpha(0.5)
@@ -569,12 +592,8 @@ fn level_indicator(gain: f32, enabled: bool, is_light: bool) -> Div {
                 .absolute()
                 .left(px(2.0))
                 .right(px(2.0))
-                .when(is_pos, |d| {
-                    d.bottom(px(30.0)).h(px(bar_height))
-                })
-                .when(!is_pos, |d| {
-                    d.top(px(30.0)).h(px(bar_height))
-                })
+                .when(is_pos, |d| d.bottom(px(30.0)).h(px(bar_height)))
+                .when(!is_pos, |d| d.top(px(30.0)).h(px(bar_height)))
                 .rounded_sm()
                 .bg(if enabled && clamped.abs() > 0.1 {
                     red()

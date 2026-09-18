@@ -590,7 +590,8 @@ impl BiquadChannel {
     #[inline]
     pub fn process(&mut self, input: f32, coeffs: &BiquadCoeffs) -> f32 {
         let output = coeffs.b0 * input + coeffs.b1 * self.x1 + coeffs.b2 * self.x2
-            - coeffs.a1 * self.y1 - coeffs.a2 * self.y2;
+            - coeffs.a1 * self.y1
+            - coeffs.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = input;
         self.y2 = self.y1;
@@ -624,12 +625,8 @@ where
         let initial_gains = state.read().map(|s| s.gains).unwrap_or([0.0; 5]);
         let mut coeffs = [BiquadCoeffs::identity(); 5];
         for b in 0..5 {
-            coeffs[b] = BiquadCoeffs::peaking(
-                EQ_FREQUENCIES[b],
-                initial_gains[b],
-                sample_rate as f32,
-                1.0,
-            );
+            coeffs[b] =
+                BiquadCoeffs::peaking(EQ_FREQUENCIES[b], initial_gains[b], sample_rate as f32, 1.0);
         }
         Self {
             input,
@@ -698,9 +695,9 @@ where
                 }
                 if state.gains != self.cached_gains {
                     self.cached_gains = state.gains;
-                    for b in 0..5 {
+                    for (b, &freq) in EQ_FREQUENCIES.iter().enumerate() {
                         self.coeffs[b] = BiquadCoeffs::peaking(
-                            EQ_FREQUENCIES[b],
+                            freq,
                             self.cached_gains[b],
                             self.sample_rate as f32,
                             1.0,
@@ -1255,7 +1252,10 @@ mod tests {
             assert!(!name.is_empty());
             assert_eq!(gains.len(), 5);
             for &g in gains {
-                assert!((-12.0..=12.0).contains(&g), "Preset {name} gain out of bounds: {g}");
+                assert!(
+                    (-12.0..=12.0).contains(&g),
+                    "Preset {name} gain out of bounds: {g}"
+                );
             }
         }
     }

@@ -209,11 +209,13 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                             dynamic_subtitle(is_light)
                                         })
                                         .hover(move |s| {
-                                            s.bg(dynamic_hover(is_light)).text_color(if repeat_all {
-                                                red()
-                                            } else {
-                                                dynamic_text(is_light)
-                                            })
+                                            s.bg(dynamic_hover(is_light)).text_color(
+                                                if repeat_all {
+                                                    red()
+                                                } else {
+                                                    dynamic_text(is_light)
+                                                },
+                                            )
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.repeat_all = !this.repeat_all;
@@ -234,13 +236,7 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool, is_light: 
         .items_center()
         .justify_between()
         .flex_shrink_0()
-        .child(
-            div()
-                .size(px(36.0))
-                .flex()
-                .items_center()
-                .justify_center(),
-        )
+        .child(div().size(px(36.0)).flex().items_center().justify_center())
         .child(
             div()
                 .text_center()
@@ -291,7 +287,8 @@ fn player_header(cx: &mut Context<NoirPlayerModel>, eq_enabled: bool, is_light: 
                         .text_color(dynamic_subtitle(is_light))
                         .cursor_pointer()
                         .hover(move |s| {
-                            s.bg(dynamic_hover(is_light)).text_color(dynamic_text(is_light))
+                            s.bg(dynamic_hover(is_light))
+                                .text_color(dynamic_text(is_light))
                         })
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
@@ -330,11 +327,7 @@ fn skip_back_btn(
         )
 }
 
-fn skip_fwd_btn(
-    interval: u32,
-    is_light: bool,
-    cx: &mut Context<NoirPlayerModel>,
-) -> Stateful<Div> {
+fn skip_fwd_btn(interval: u32, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
     div()
         .id("skip-forward")
         .size(px(40.0))

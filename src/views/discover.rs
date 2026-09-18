@@ -45,7 +45,9 @@ pub fn render_discover(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerM
                     .p_3()
                     .rounded_xl()
                     .bg(dynamic_surface(is_light))
-                    .when(is_light, |d| d.border_1().border_color(dynamic_border(is_light)))
+                    .when(is_light, |d| {
+                        d.border_1().border_color(dynamic_border(is_light))
+                    })
                     .items_center()
                     .child(
                         div()

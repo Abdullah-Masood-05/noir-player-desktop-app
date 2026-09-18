@@ -79,31 +79,59 @@ pub fn nav_bg() -> Hsla {
 }
 
 pub fn dynamic_bg(is_light: bool) -> Hsla {
-    if is_light { rgb(LIGHT_BG).into() } else { rgb(BG).into() }
+    if is_light {
+        rgb(LIGHT_BG).into()
+    } else {
+        rgb(BG).into()
+    }
 }
 
 pub fn dynamic_surface(is_light: bool) -> Hsla {
-    if is_light { rgb(LIGHT_SURFACE).into() } else { rgb(SURFACE).into() }
+    if is_light {
+        rgb(LIGHT_SURFACE).into()
+    } else {
+        rgb(SURFACE).into()
+    }
 }
 
 pub fn dynamic_text(is_light: bool) -> Hsla {
-    if is_light { rgb(LIGHT_FOREGROUND).into() } else { rgb(0xFFFFFF).into() }
+    if is_light {
+        rgb(LIGHT_FOREGROUND).into()
+    } else {
+        rgb(0xFFFFFF).into()
+    }
 }
 
 pub fn dynamic_subtitle(is_light: bool) -> Hsla {
-    if is_light { rgb(LIGHT_MUTED).into() } else { white(0.70) }
+    if is_light {
+        rgb(LIGHT_MUTED).into()
+    } else {
+        white(0.70)
+    }
 }
 
 pub fn dynamic_muted(is_light: bool) -> Hsla {
-    if is_light { rgb(0x8E8E93).into() } else { white(0.55) }
+    if is_light {
+        rgb(0x8E8E93).into()
+    } else {
+        white(0.55)
+    }
 }
 
 pub fn dynamic_border(is_light: bool) -> Hsla {
-    if is_light { rgb(LIGHT_BORDER).into() } else { rgb(0x2A2A2A).into() }
+    if is_light {
+        rgb(LIGHT_BORDER).into()
+    } else {
+        rgb(0x2A2A2A).into()
+    }
 }
 
 pub fn dynamic_hover(is_light: bool) -> Hsla {
-    if is_light { rgb(0xF0F1F3).into() } else { rgb(SURFACE).into() }
+    if is_light {
+        rgb(0xF0F1F3).into()
+    } else {
+        rgb(SURFACE).into()
+    }
 }
 
 /// Red top wash: rich vibrant crimson in dark mode (matching the classic Noir design),

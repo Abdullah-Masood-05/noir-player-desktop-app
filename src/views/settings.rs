@@ -69,10 +69,10 @@ pub fn render_settings_modal(
                 let k = event.keystroke.key.trim();
                 let ctrl_or_cmd =
                     event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
-                if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                    cx.stop_propagation();
-                    this.close_settings(cx);
-                } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
+                if k.eq_ignore_ascii_case("escape")
+                    || k.eq_ignore_ascii_case("esc")
+                    || (ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")))
+                {
                     cx.stop_propagation();
                     this.close_settings(cx);
                 } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
@@ -81,81 +81,75 @@ pub fn render_settings_modal(
                     this.open_equalizer(cx);
                 }
             }))
-            .child(
-                modal_transition(
-                    "settings-modal-anim",
-                    v_flex()
-                        .id("settings-modal")
-                        .track_focus(&model.settings_focus_handle)
-                        .w(px(720.0))
-                        .h(px(580.0))
-                        .rounded_2xl()
-                        .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
-                        .border(px(1.0))
-                        .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
-                        .shadow(vec![BoxShadow::new(
-                            px(0.0),
-                            px(24.0),
-                            if is_light { c(0x00000033) } else { c(0x000000) },
-                        )
-                        .blur_radius(px(48.0))])
-                        .overflow_hidden()
-                        .on_scroll_wheel(|_, _, cx| {
+            .child(modal_transition(
+                "settings-modal-anim",
+                v_flex()
+                    .id("settings-modal")
+                    .track_focus(&model.settings_focus_handle)
+                    .w(px(720.0))
+                    .h(px(580.0))
+                    .rounded_2xl()
+                    .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
+                    .border(px(1.0))
+                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
+                    .shadow(vec![BoxShadow::new(
+                        px(0.0),
+                        px(24.0),
+                        if is_light { c(0x00000033) } else { c(0x000000) },
+                    )
+                    .blur_radius(px(48.0))])
+                    .overflow_hidden()
+                    .on_scroll_wheel(|_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        let k = event.keystroke.key.trim();
+                        let ctrl_or_cmd =
+                            event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+                        if k.eq_ignore_ascii_case("escape")
+                            || k.eq_ignore_ascii_case("esc")
+                            || (ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")))
+                        {
                             cx.stop_propagation();
-                        })
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                            let k = event.keystroke.key.trim();
-                            let ctrl_or_cmd =
-                                event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
-                            if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                                cx.stop_propagation();
-                                this.close_settings(cx);
-                            } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
-                                cx.stop_propagation();
-                                this.close_settings(cx);
-                            } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
-                                cx.stop_propagation();
-                                this.close_settings(cx);
-                                this.open_equalizer(cx);
-                            }
-                        }))
-                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_settings(cx);
+                        } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
                             cx.stop_propagation();
-                            window.focus(&this.settings_focus_handle, cx);
-                        }))
-                        .child(modal_header(model, is_light, cx))
-                        .child(category_chips(model, is_light, cx))
-                        .child(
-                            div()
-                                .id("settings-scroll")
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_y_scrollbar()
-                                .px(px(16.0))
-                                .py(px(10.0))
-                                .flex()
-                                .flex_col()
-                                .gap(px(8.0))
-                                .children(build_rows(
-                                    model,
-                                    &query,
-                                    current_cat,
-                                    selected_index,
-                                    is_light,
-                                    cx,
-                                )),
-                        )
-                        .child(keyboard_hints(is_light)),
-                ),
-            ),
+                            this.close_settings(cx);
+                            this.open_equalizer(cx);
+                        }
+                    }))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        window.focus(&this.settings_focus_handle, cx);
+                    }))
+                    .child(modal_header(model, is_light, cx))
+                    .child(category_chips(model, is_light, cx))
+                    .child(
+                        div()
+                            .id("settings-scroll")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scrollbar()
+                            .px(px(16.0))
+                            .py(px(10.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .children(build_rows(
+                                model,
+                                &query,
+                                current_cat,
+                                selected_index,
+                                is_light,
+                                cx,
+                            )),
+                    )
+                    .child(keyboard_hints(is_light)),
+            )),
     )
 }
 
-fn modal_header(
-    model: &NoirPlayerModel,
-    is_light: bool,
-    cx: &mut Context<NoirPlayerModel>,
-) -> Div {
+fn modal_header(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
     h_flex()
         .w_full()
         .items_center()
@@ -232,7 +226,11 @@ fn category_chips(
                 .py(px(4.5))
                 .rounded_lg()
                 .text_xs()
-                .font_weight(if active { FontWeight::BOLD } else { FontWeight::NORMAL })
+                .font_weight(if active {
+                    FontWeight::BOLD
+                } else {
+                    FontWeight::NORMAL
+                })
                 .bg(if active {
                     red()
                 } else if is_light {
@@ -272,8 +270,8 @@ fn build_rows(
 
     // ── Equalizer rows ──────────────────────────────────────────────────────────
     let eq_visible = cat == SettingsCategory::All || cat == SettingsCategory::Equalizer;
-    let eq_match =
-        query.is_empty() || "equalizer eq sound audio preset bass treble vocal rock pop".contains(query);
+    let eq_match = query.is_empty()
+        || "equalizer eq sound audio preset bass treble vocal rock pop".contains(query);
 
     if eq_visible && eq_match {
         let eq_enabled = model.store.equalizer_enabled;
@@ -329,14 +327,20 @@ fn build_rows(
                     },
                     is_light,
                 ))
-                .child(toggle_switch("eq-toggle", eq_enabled, is_light, cx, |this, _, _, cx| {
-                    let next = !this.store.equalizer_enabled;
-                    this.store.equalizer_enabled = next;
-                    if let Some(p) = this.player.as_ref() {
-                        p.set_equalizer_enabled(next);
-                    }
-                    this.save_current_store(cx);
-                }))
+                .child(toggle_switch(
+                    "eq-toggle",
+                    eq_enabled,
+                    is_light,
+                    cx,
+                    |this, _, _, cx| {
+                        let next = !this.store.equalizer_enabled;
+                        this.store.equalizer_enabled = next;
+                        if let Some(p) = this.player.as_ref() {
+                            p.set_equalizer_enabled(next);
+                        }
+                        this.save_current_store(cx);
+                    },
+                ))
                 .into_any_element(),
         );
         idx += 1;
@@ -364,25 +368,23 @@ fn build_rows(
                     is_light,
                     cx,
                     |this, _, _, cx| {
-                        this.store.seek_interval_seconds =
-                            match this.store.seek_interval_seconds {
-                                60 => 30,
-                                30 => 15,
-                                15 => 10,
-                                10 => 5,
-                                _ => 5,
-                            };
+                        this.store.seek_interval_seconds = match this.store.seek_interval_seconds {
+                            60 => 30,
+                            30 => 15,
+                            15 => 10,
+                            10 => 5,
+                            _ => 5,
+                        };
                         this.save_current_store(cx);
                     },
                     |this, _, _, cx| {
-                        this.store.seek_interval_seconds =
-                            match this.store.seek_interval_seconds {
-                                5 => 10,
-                                10 => 15,
-                                15 => 30,
-                                30 => 60,
-                                _ => 60,
-                            };
+                        this.store.seek_interval_seconds = match this.store.seek_interval_seconds {
+                            5 => 10,
+                            10 => 15,
+                            15 => 30,
+                            30 => 60,
+                            _ => 60,
+                        };
                         this.save_current_store(cx);
                     },
                 ))
@@ -400,10 +402,16 @@ fn build_rows(
                     "Automatically re-open and queue last played song on launch",
                     is_light,
                 ))
-                .child(toggle_switch("resume-toggle", resume, is_light, cx, |this, _, _, cx| {
-                    this.store.resume_last_song = !this.store.resume_last_song;
-                    this.save_current_store(cx);
-                }))
+                .child(toggle_switch(
+                    "resume-toggle",
+                    resume,
+                    is_light,
+                    cx,
+                    |this, _, _, cx| {
+                        this.store.resume_last_song = !this.store.resume_last_song;
+                        this.save_current_store(cx);
+                    },
+                ))
                 .into_any_element(),
         );
         idx += 1;
@@ -411,7 +419,8 @@ fn build_rows(
 
     // ── Appearance rows ─────────────────────────────────────────────────────────
     let app_visible = cat == SettingsCategory::All || cat == SettingsCategory::Appearance;
-    let app_match = query.is_empty() || "appearance theme dark light red white color style".contains(query);
+    let app_match =
+        query.is_empty() || "appearance theme dark light red white color style".contains(query);
 
     if app_visible && app_match {
         let is_light_theme = model.store.theme_mode.eq_ignore_ascii_case("light");
@@ -434,11 +443,7 @@ fn build_rows(
                                 .px(px(10.0))
                                 .py(px(5.0))
                                 .rounded_lg()
-                                .bg(if !is_light_theme {
-                                    red()
-                                } else {
-                                    c(0xF0F1F3)
-                                })
+                                .bg(if !is_light_theme { red() } else { c(0xF0F1F3) })
                                 .text_color(if !is_light_theme {
                                     white(1.0)
                                 } else {
@@ -460,11 +465,7 @@ fn build_rows(
                                 .px(px(10.0))
                                 .py(px(5.0))
                                 .rounded_lg()
-                                .bg(if is_light_theme {
-                                    red()
-                                } else {
-                                    c(0x1C1F26)
-                                })
+                                .bg(if is_light_theme { red() } else { c(0x1C1F26) })
                                 .text_color(if is_light_theme {
                                     white(1.0)
                                 } else {
@@ -488,7 +489,8 @@ fn build_rows(
 
     // ── Library & Folders rows ──────────────────────────────────────────────────
     let lib_visible = cat == SettingsCategory::All || cat == SettingsCategory::Library;
-    let lib_match = query.is_empty() || "music folder library rescan files scan download".contains(query);
+    let lib_match =
+        query.is_empty() || "music folder library rescan files scan download".contains(query);
 
     if lib_visible && lib_match {
         // 1. Add Music Folder & Rescan Actions
@@ -610,7 +612,10 @@ fn build_rows(
                         )
                         .child(
                             div()
-                                .id(SharedString::from(format!("remove-folder-{}", folder_clone.display())))
+                                .id(SharedString::from(format!(
+                                    "remove-folder-{}",
+                                    folder_clone.display()
+                                )))
                                 .px(px(10.0))
                                 .py(px(4.0))
                                 .rounded_md()
@@ -712,7 +717,8 @@ fn build_rows(
 
     // ── About rows ──────────────────────────────────────────────────────────────
     let ab_visible = cat == SettingsCategory::All || cat == SettingsCategory::About;
-    let ab_match = query.is_empty() || "about noir player version info help shortcuts".contains(query);
+    let ab_match =
+        query.is_empty() || "about noir player version info help shortcuts".contains(query);
 
     if ab_visible && ab_match {
         let active = idx == selected;
@@ -746,7 +752,11 @@ fn build_rows(
                                             div()
                                                 .text_sm()
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(if is_light { c(0x18181B) } else { white(0.95) })
+                                                .text_color(if is_light {
+                                                    c(0x18181B)
+                                                } else {
+                                                    white(0.95)
+                                                })
                                                 .child("Noir Player Desktop"),
                                         )
                                         .child(
@@ -788,7 +798,9 @@ fn build_rows(
                         .hover(|s| s.opacity(0.85))
                         .on_click(cx.listener(|_, _, _, cx| {
                             cx.stop_propagation();
-                            cx.open_url("https://github.com/Abdullah-Masood-05/noir-player-desktop-app");
+                            cx.open_url(
+                                "https://github.com/Abdullah-Masood-05/noir-player-desktop-app",
+                            );
                         }))
                         .child(icon_text(MusicIcon::ExternalLink, 13.0))
                         .child("GitHub"),
@@ -917,12 +929,7 @@ fn toggle_switch<H>(
     handler: H,
 ) -> Stateful<Div>
 where
-    H: Fn(
-            &mut NoirPlayerModel,
-            &ClickEvent,
-            &mut Window,
-            &mut Context<NoirPlayerModel>,
-        ) + 'static,
+    H: Fn(&mut NoirPlayerModel, &ClickEvent, &mut Window, &mut Context<NoirPlayerModel>) + 'static,
 {
     div()
         .id(SharedString::from(id.to_owned()))
@@ -944,7 +951,7 @@ where
                 .rounded_full()
                 .bg(white(1.0))
                 .shadow(vec![
-                    BoxShadow::new(px(0.0), px(1.0), c(0x000000)).blur_radius(px(3.0)),
+                    BoxShadow::new(px(0.0), px(1.0), c(0x000000)).blur_radius(px(3.0))
                 ])
                 .when(on, |d| d.ml_auto())
                 .flex()
@@ -967,18 +974,8 @@ fn stepper<Dm, Dp>(
     inc: Dp,
 ) -> Div
 where
-    Dm: Fn(
-            &mut NoirPlayerModel,
-            &ClickEvent,
-            &mut Window,
-            &mut Context<NoirPlayerModel>,
-        ) + 'static,
-    Dp: Fn(
-            &mut NoirPlayerModel,
-            &ClickEvent,
-            &mut Window,
-            &mut Context<NoirPlayerModel>,
-        ) + 'static,
+    Dm: Fn(&mut NoirPlayerModel, &ClickEvent, &mut Window, &mut Context<NoirPlayerModel>) + 'static,
+    Dp: Fn(&mut NoirPlayerModel, &ClickEvent, &mut Window, &mut Context<NoirPlayerModel>) + 'static,
 {
     h_flex()
         .items_center()

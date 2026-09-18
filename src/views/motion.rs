@@ -53,9 +53,7 @@ pub fn backdrop_transition(id: impl Into<ElementId>, content: impl IntoElement) 
         .with_animation(
             id,
             Animation::new(Duration::from_millis(180)),
-            move |element, progress| {
-                element.opacity(progress)
-            },
+            move |element, progress| element.opacity(progress),
         )
         .into_any_element()
 }

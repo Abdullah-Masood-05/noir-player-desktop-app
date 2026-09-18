@@ -23,17 +23,9 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
     v_flex()
         .w_full()
         .flex_shrink_0()
-        .bg(if is_light {
-            c(0xFFFFFF)
-        } else {
-            surface()
-        })
+        .bg(if is_light { c(0xFFFFFF) } else { surface() })
         .border_t(px(1.0))
-        .border_color(if is_light {
-            c(0xE4E4E7)
-        } else {
-            c(0x282828)
-        })
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x282828) })
         .child(
             div()
                 .w_full()
@@ -96,11 +88,7 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
                         .items_center()
                         .justify_center()
                         .cursor_pointer()
-                        .text_color(if is_light {
-                            c(0x18181B)
-                        } else {
-                            white(1.0)
-                        })
+                        .text_color(if is_light { c(0x18181B) } else { white(1.0) })
                         .hover(move |s| {
                             if is_light {
                                 s.bg(c(0xF0F1F3))
@@ -129,11 +117,7 @@ pub fn mini_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel
                         .items_center()
                         .justify_center()
                         .cursor_pointer()
-                        .text_color(if is_light {
-                            c(0x18181B)
-                        } else {
-                            white(1.0)
-                        })
+                        .text_color(if is_light { c(0x18181B) } else { white(1.0) })
                         .hover(move |s| {
                             if is_light {
                                 s.bg(c(0xF0F1F3))

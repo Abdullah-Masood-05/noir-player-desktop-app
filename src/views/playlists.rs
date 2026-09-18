@@ -150,7 +150,10 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
                             div()
                                 .text_xs()
                                 .text_color(dynamic_subtitle(is_light))
-                                .child(format!("{} songs · {available} available", playlist.paths.len())),
+                                .child(format!(
+                                    "{} songs · {available} available",
+                                    playlist.paths.len()
+                                )),
                         )
                 }),
             )),
@@ -168,14 +171,10 @@ pub fn render_playlists(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayer
                 .relative()
                 .child(app_bar(detail.as_deref().unwrap_or("Playlists"), is_light))
                 .child(tab_transition(format!("playlist-body-{detail:?}"), body))
-                .child(
-                    h_flex().flex_shrink_0().p(px(12.0)).justify_end().child(
-                        Button::new("new-playlist").label("New playlist").on_click(
-                            cx.listener(|this, _, window, cx| {
-                                this.create_playlist_dialog(window, cx)
-                            }),
-                        ),
+                .child(h_flex().flex_shrink_0().p(px(12.0)).justify_end().child(
+                    Button::new("new-playlist").label("New playlist").on_click(
+                        cx.listener(|this, _, window, cx| this.create_playlist_dialog(window, cx)),
                     ),
-                ),
+                )),
         )
 }

@@ -1,11 +1,17 @@
 use crate::app::{ActiveTab, NoirPlayerModel};
-use crate::views::ui::{icon_text, nav_bg, red, selected_highlight, white, LIGHT_MUTED, LIGHT_NAV_BG};
+use crate::views::ui::{
+    icon_text, nav_bg, red, selected_highlight, white, LIGHT_MUTED, LIGHT_NAV_BG,
+};
 use gpui_kit::assets::IconName as MusicIcon;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
+pub fn bottom_nav(
+    active: ActiveTab,
+    settings_open: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Div {
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let items = vec![
         (ActiveTab::Library, "Library", MusicIcon::LibraryBig),
@@ -106,11 +112,13 @@ pub fn bottom_nav(active: ActiveTab, settings_open: bool, cx: &mut Context<NoirP
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(icon_text(MusicIcon::Settings, 28.0).text_color(if settings_open {
-                        white(1.0)
-                    } else {
-                        unselected_color
-                    })),
+                    .child(
+                        icon_text(MusicIcon::Settings, 28.0).text_color(if settings_open {
+                            white(1.0)
+                        } else {
+                            unselected_color
+                        }),
+                    ),
             ))
             .child(
                 div()

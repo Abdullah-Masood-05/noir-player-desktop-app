@@ -389,7 +389,9 @@ impl NoirPlayerModel {
         let folders = self.effective_music_folders();
         if folders.is_empty() {
             self.status = "Music folder unavailable".into();
-            self.error = Some("Could not locate any configured music folders or the system Music folder".into());
+            self.error = Some(
+                "Could not locate any configured music folders or the system Music folder".into(),
+            );
             cx.notify();
             return;
         }

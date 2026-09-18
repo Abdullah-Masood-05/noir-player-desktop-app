@@ -361,11 +361,13 @@ mod tests {
         // Test saving customized settings and reloading
         let temp = TempDir::new();
         let path = temp.0.join("settings_test.json");
-        let mut custom = Store::default();
-        custom.seek_interval_seconds = 5;
-        custom.equalizer_enabled = true;
-        custom.equalizer_gains = [6.0, 4.0, 1.0, 0.0, 0.0];
-        custom.equalizer_preset = "Bass Boost".to_string();
+        let mut custom = Store {
+            seek_interval_seconds: 5,
+            equalizer_enabled: true,
+            equalizer_gains: [6.0, 4.0, 1.0, 0.0, 0.0],
+            equalizer_preset: "Bass Boost".to_string(),
+            ..Default::default()
+        };
         custom.save(&path).unwrap();
 
         let reloaded = Store::load(&path).unwrap();
@@ -375,13 +377,19 @@ mod tests {
         assert_eq!(reloaded.equalizer_preset, "Bass Boost");
 
         // Test music_folders and download_folder persistence
-        custom.music_folders = vec![PathBuf::from("/music/folder1"), PathBuf::from("/music/folder2")];
+        custom.music_folders = vec![
+            PathBuf::from("/music/folder1"),
+            PathBuf::from("/music/folder2"),
+        ];
         custom.download_folder = Some(PathBuf::from("/music/downloads"));
         custom.save(&path).unwrap();
 
         let reloaded_folders = Store::load(&path).unwrap();
         assert_eq!(reloaded_folders.music_folders.len(), 2);
-        assert_eq!(reloaded_folders.download_folder, Some(PathBuf::from("/music/downloads")));
+        assert_eq!(
+            reloaded_folders.download_folder,
+            Some(PathBuf::from("/music/downloads"))
+        );
         assert_eq!(reloaded_folders.all_music_folders().len(), 2);
     }
 
@@ -394,6 +402,9 @@ mod tests {
             "another_field": 12345
         }"#;
         let loaded: Result<Store, _> = serde_json::from_str(json);
-        assert!(loaded.is_ok(), "Unknown fields should be tolerated for schema evolution");
+        assert!(
+            loaded.is_ok(),
+            "Unknown fields should be tolerated for schema evolution"
+        );
     }
 }

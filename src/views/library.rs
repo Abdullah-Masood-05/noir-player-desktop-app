@@ -9,8 +9,7 @@ use crate::app::{store, Collection, LibraryTab, NoirPlayerModel};
 use crate::media::Track;
 use crate::views::ui::{
     dynamic_hover, dynamic_muted, dynamic_subtitle, dynamic_text, format_duration, icon_text,
-    img_from_bytes, red, red_a, selected_highlight, smooth_scroll, tab_transition, top_fade,
-    white,
+    img_from_bytes, red, red_a, selected_highlight, smooth_scroll, tab_transition, top_fade, white,
 };
 
 pub fn app_bar(title: &str, is_light: bool) -> Div {

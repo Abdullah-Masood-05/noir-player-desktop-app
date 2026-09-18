@@ -5,7 +5,7 @@ use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
 use crate::media::EQ_PRESETS;
-use crate::views::ui::{icon_text, red, white};
+use crate::views::ui::{backdrop_transition, icon_text, modal_transition, red, white};
 
 fn c(hex: u32) -> Hsla {
     rgb(hex).into()
@@ -15,60 +15,89 @@ pub fn render_equalizer_modal(
     model: &mut NoirPlayerModel,
     cx: &mut Context<NoirPlayerModel>,
 ) -> impl IntoElement {
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let eq_enabled = model.store.equalizer_enabled;
     let gains = model.store.equalizer_gains;
     let active_preset = model.store.equalizer_preset.clone();
 
-    div()
-        .id("equalizer-backdrop")
-        .absolute()
-        .inset_0()
-        .bg(rgba(0x000000CC))
-        .flex()
-        .items_center()
-        .justify_center()
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.close_equalizer(cx);
-        }))
-        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-            let k = event.keystroke.key.trim();
-            if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                cx.stop_propagation();
+    backdrop_transition(
+        "equalizer-backdrop-anim",
+        div()
+            .id("equalizer-backdrop")
+            .absolute()
+            .inset_0()
+            .bg(rgba(if is_light { 0x00000066 } else { 0x000000CC }))
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_click(cx.listener(|this, _, _, cx| {
                 this.close_equalizer(cx);
-            }
-        }))
-        .child(
-            v_flex()
-                .id("equalizer-modal")
-                .track_focus(&model.equalizer_focus_handle)
-                .w(px(660.0))
-                .rounded_2xl()
-                .bg(c(0x111215))
-                .border(px(1.0))
-                .border_color(c(0x2A2D35))
-                .shadow(vec![BoxShadow::new(px(0.0), px(24.0), c(0x000000))
-                    .blur_radius(px(48.0))])
-                .overflow_hidden()
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    let k = event.keystroke.key.trim();
-                    if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                        cx.stop_propagation();
-                        this.close_equalizer(cx);
-                    }
-                }))
-                .on_click(cx.listener(|this, _, window, cx| {
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                let k = event.keystroke.key.trim();
+                let ctrl_or_cmd =
+                    event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+                if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
                     cx.stop_propagation();
-                    window.focus(&this.equalizer_focus_handle, cx);
-                }))
-                .child(modal_header(model, cx))
-                .child(master_toggle_section(eq_enabled, cx))
-                .child(presets_section(&active_preset, cx))
-                .child(bands_section(gains, eq_enabled, cx))
-                .child(modal_footer()),
-        )
+                    this.close_equalizer(cx);
+                } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
+                    cx.stop_propagation();
+                    this.close_equalizer(cx);
+                } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
+                    cx.stop_propagation();
+                    this.close_equalizer(cx);
+                    this.open_settings(crate::views::settings::SettingsCategory::Equalizer, cx);
+                }
+            }))
+            .child(
+                modal_transition(
+                    "equalizer-modal-anim",
+                    v_flex()
+                        .id("equalizer-modal")
+                        .track_focus(&model.equalizer_focus_handle)
+                        .w(px(660.0))
+                        .rounded_2xl()
+                        .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
+                        .border(px(1.0))
+                        .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
+                        .shadow(vec![BoxShadow::new(
+                            px(0.0),
+                            px(24.0),
+                            if is_light { c(0x00000033) } else { c(0x000000) },
+                        )
+                        .blur_radius(px(48.0))])
+                        .overflow_hidden()
+                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                            let k = event.keystroke.key.trim();
+                            let ctrl_or_cmd =
+                                event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+                            if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                                cx.stop_propagation();
+                                this.close_equalizer(cx);
+                            } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
+                                cx.stop_propagation();
+                                this.close_equalizer(cx);
+                            } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
+                                cx.stop_propagation();
+                                this.close_equalizer(cx);
+                                this.open_settings(crate::views::settings::SettingsCategory::Equalizer, cx);
+                            }
+                        }))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            cx.stop_propagation();
+                            window.focus(&this.equalizer_focus_handle, cx);
+                        }))
+                        .child(modal_header(is_light, cx))
+                        .child(master_toggle_section(eq_enabled, is_light, cx))
+                        .child(presets_section(&active_preset, is_light, cx))
+                        .child(bands_section(gains, eq_enabled, is_light, cx))
+                        .child(modal_footer(is_light)),
+                ),
+            ),
+    )
 }
 
-fn modal_header(_model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+fn modal_header(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
     h_flex()
         .w_full()
         .items_center()
@@ -76,7 +105,7 @@ fn modal_header(_model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> 
         .px(px(20.0))
         .py(px(16.0))
         .border_b(px(1.0))
-        .border_color(c(0x20222A))
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x20222A) })
         .child(
             h_flex()
                 .items_center()
@@ -85,7 +114,7 @@ fn modal_header(_model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> 
                     div()
                         .size(px(36.0))
                         .rounded_xl()
-                        .bg(c(0x1F1418))
+                        .bg(if is_light { c(0xFDE8E8) } else { c(0x1F1418) })
                         .border(px(1.0))
                         .border_color(red().alpha(0.35))
                         .flex()
@@ -101,13 +130,13 @@ fn modal_header(_model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> 
                             div()
                                 .text_base()
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(white(0.95))
+                                .text_color(if is_light { c(0x18181B) } else { white(0.95) })
                                 .child("Audio Equalizer"),
                         )
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(white(0.5))
+                                .text_color(if is_light { c(0x71717A) } else { white(0.5) })
                                 .child("5-Band Parametric Frequency Shaper"),
                         ),
                 ),
@@ -122,14 +151,14 @@ fn modal_header(_model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> 
                         .px(px(10.0))
                         .py(px(5.0))
                         .rounded_lg()
-                        .bg(c(0x1A1C22))
+                        .bg(if is_light { c(0xF0F1F3) } else { c(0x1A1C22) })
                         .border(px(1.0))
-                        .border_color(c(0x282B33))
+                        .border_color(if is_light { c(0xDCDEE2) } else { c(0x282B33) })
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(white(0.7))
+                        .text_color(if is_light { c(0x3F3F46) } else { white(0.7) })
                         .cursor_pointer()
-                        .hover(|s| s.bg(c(0x242730)).text_color(white(1.0)))
+                        .hover(|s| s.bg(c(0xFF000022)).text_color(red()))
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
                             this.store.equalizer_preset = "Flat".to_string();
@@ -150,8 +179,8 @@ fn modal_header(_model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> 
                         .items_center()
                         .justify_center()
                         .cursor_pointer()
-                        .text_color(white(0.5))
-                        .hover(|s| s.bg(c(0x242730)).text_color(white(1.0)))
+                        .text_color(if is_light { c(0x71717A) } else { white(0.5) })
+                        .hover(|s| s.bg(c(0xFF000022)).text_color(red()))
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
                             this.close_equalizer(cx);
@@ -161,7 +190,7 @@ fn modal_header(_model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> 
         )
 }
 
-fn master_toggle_section(enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
+fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
     h_flex()
         .w_full()
         .items_center()
@@ -169,8 +198,8 @@ fn master_toggle_section(enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Di
         .px(px(20.0))
         .py(px(14.0))
         .border_b(px(1.0))
-        .border_color(c(0x1C1F26))
-        .bg(c(0x13151A))
+        .border_color(if is_light { c(0xEDEAEF) } else { c(0x1C1F26) })
+        .bg(if is_light { c(0xF9FAFB) } else { c(0x13151A) })
         .child(
             h_flex()
                 .items_center()
@@ -179,7 +208,7 @@ fn master_toggle_section(enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Di
                     div()
                         .size(px(10.0))
                         .rounded_full()
-                        .bg(if enabled { red() } else { c(0x444752) })
+                        .bg(if enabled { red() } else { if is_light { c(0x9CA3AF) } else { c(0x444752) } })
                         .when(enabled, |d| {
                             d.shadow(vec![BoxShadow::new(px(0.0), px(0.0), red()).blur_radius(px(6.0))])
                         }),
@@ -191,7 +220,13 @@ fn master_toggle_section(enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Di
                             div()
                                 .text_sm()
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(if enabled { white(0.95) } else { white(0.6) })
+                                .text_color(if is_light {
+                                    if enabled { c(0x18181B) } else { c(0x71717A) }
+                                } else if enabled {
+                                    white(0.95)
+                                } else {
+                                    white(0.6)
+                                })
                                 .child(if enabled {
                                     "Equalizer Active"
                                 } else {
@@ -201,7 +236,7 @@ fn master_toggle_section(enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Di
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(white(0.4))
+                                .text_color(if is_light { c(0x71717A) } else { white(0.4) })
                                 .child("Apply real-time frequency adjustments to playback"),
                         ),
                 ),
@@ -212,7 +247,7 @@ fn master_toggle_section(enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Di
                 .w(px(50.0))
                 .h(px(26.0))
                 .rounded_full()
-                .bg(if enabled { red() } else { c(0x2C2E38) })
+                .bg(if enabled { red() } else { if is_light { c(0xD1D5DB) } else { c(0x2C2E38) } })
                 .p(px(2.0))
                 .flex()
                 .items_center()
@@ -247,14 +282,14 @@ fn master_toggle_section(enabled: bool, cx: &mut Context<NoirPlayerModel>) -> Di
         )
 }
 
-fn presets_section(current: &str, cx: &mut Context<NoirPlayerModel>) -> Div {
+fn presets_section(current: &str, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
     v_flex()
         .w_full()
         .px(px(20.0))
         .py(px(12.0))
         .gap(px(8.0))
         .border_b(px(1.0))
-        .border_color(c(0x1C1F26))
+        .border_color(if is_light { c(0xEDEAEF) } else { c(0x1C1F26) })
         .child(
             h_flex()
                 .items_center()
@@ -263,7 +298,7 @@ fn presets_section(current: &str, cx: &mut Context<NoirPlayerModel>) -> Div {
                     div()
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .text_color(white(0.5))
+                        .text_color(if is_light { c(0x71717A) } else { white(0.5) })
                         .child("PRESETS"),
                 )
                 .child(
@@ -288,12 +323,30 @@ fn presets_section(current: &str, cx: &mut Context<NoirPlayerModel>) -> Div {
                         .rounded_lg()
                         .text_xs()
                         .font_weight(if active { FontWeight::BOLD } else { FontWeight::NORMAL })
-                        .bg(if active { red() } else { c(0x181A21) })
+                        .bg(if active {
+                            red()
+                        } else if is_light {
+                            c(0xF0F1F3)
+                        } else {
+                            c(0x181A21)
+                        })
                         .border(px(1.0))
-                        .border_color(if active { red() } else { c(0x282C36) })
-                        .text_color(if active { white(1.0) } else { white(0.7) })
+                        .border_color(if active {
+                            red()
+                        } else if is_light {
+                            c(0xDCDEE2)
+                        } else {
+                            c(0x282C36)
+                        })
+                        .text_color(if active {
+                            white(1.0)
+                        } else if is_light {
+                            c(0x3F3F46)
+                        } else {
+                            white(0.7)
+                        })
                         .cursor_pointer()
-                        .hover(|s| s.bg(c(0x242833)).text_color(white(1.0)))
+                        .hover(|s| s.opacity(0.85))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
                             this.store.equalizer_preset = name.to_string();
@@ -313,6 +366,7 @@ fn presets_section(current: &str, cx: &mut Context<NoirPlayerModel>) -> Div {
 fn bands_section(
     gains: [f32; 5],
     enabled: bool,
+    is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
 ) -> Div {
     const BAND_INFO: [(&str, &str); 5] = [
@@ -336,13 +390,13 @@ fn bands_section(
                     div()
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
-                        .text_color(white(0.5))
+                        .text_color(if is_light { c(0x71717A) } else { white(0.5) })
                         .child("FREQUENCY BANDS (−12 dB to +12 dB)"),
                 )
                 .child(
                     div()
                         .text_xs()
-                        .text_color(white(0.4))
+                        .text_color(if is_light { c(0x71717A) } else { white(0.4) })
                         .child("Adjust with + / − buttons"),
                 ),
         )
@@ -366,10 +420,16 @@ fn bands_section(
                         .gap(px(6.0))
                         .p(px(10.0))
                         .rounded_xl()
-                        .bg(c(0x16181F))
+                        .bg(if is_light {
+                            c(0xF9FAFB)
+                        } else {
+                            c(0x16181F)
+                        })
                         .border(px(1.0))
                         .border_color(if is_active {
                             red().alpha(0.5)
+                        } else if is_light {
+                            c(0xE5E7EB)
                         } else {
                             c(0x232630)
                         })
@@ -377,13 +437,13 @@ fn bands_section(
                             div()
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(white(0.85))
+                                .text_color(if is_light { c(0x18181B) } else { white(0.85) })
                                 .child(freq),
                         )
                         .child(
                             div()
                                 .text_xs()
-                                .text_color(white(0.4))
+                                .text_color(if is_light { c(0x71717A) } else { white(0.4) })
                                 .child(desc),
                         )
                         // Gain readout
@@ -392,22 +452,34 @@ fn bands_section(
                                 .px(px(8.0))
                                 .py(px(3.0))
                                 .rounded_md()
-                                .bg(if is_active { red().alpha(0.2) } else { c(0x101116) })
+                                .bg(if is_active {
+                                    red().alpha(0.2)
+                                } else if is_light {
+                                    c(0xF0F1F3)
+                                } else {
+                                    c(0x101116)
+                                })
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
-                                .text_color(if is_active { red() } else { white(0.55) })
+                                .text_color(if is_active {
+                                    red()
+                                } else if is_light {
+                                    c(0x3F3F46)
+                                } else {
+                                    white(0.55)
+                                })
                                 .child(gain_str),
                         )
                         // Visual level bar
-                        .child(level_indicator(gain, enabled))
+                        .child(level_indicator(gain, enabled, is_light))
                         // Plus / Minus Stepper
                         .child(
                             h_flex()
                                 .items_center()
                                 .rounded_lg()
-                                .bg(c(0x101115))
+                                .bg(if is_light { c(0xF0F1F3) } else { c(0x101115) })
                                 .border(px(1.0))
-                                .border_color(c(0x262A34))
+                                .border_color(if is_light { c(0xDCDEE2) } else { c(0x262A34) })
                                 .overflow_hidden()
                                 .child(
                                     div()
@@ -416,9 +488,9 @@ fn bands_section(
                                         .py(px(4.0))
                                         .text_sm()
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(white(0.8))
+                                        .text_color(if is_light { c(0x3F3F46) } else { white(0.8) })
                                         .cursor_pointer()
-                                        .hover(|s| s.bg(c(0xFF000033)).text_color(white(1.0)))
+                                        .hover(|s| s.bg(c(0xFF000033)).text_color(red()))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             cx.stop_propagation();
                                             let mut g = this.store.equalizer_gains;
@@ -439,9 +511,9 @@ fn bands_section(
                                         .py(px(4.0))
                                         .text_sm()
                                         .font_weight(FontWeight::BOLD)
-                                        .text_color(white(0.8))
+                                        .text_color(if is_light { c(0x3F3F46) } else { white(0.8) })
                                         .cursor_pointer()
-                                        .hover(|s| s.bg(c(0xFF000033)).text_color(white(1.0)))
+                                        .hover(|s| s.bg(c(0xFF000033)).text_color(red()))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             cx.stop_propagation();
                                             let mut g = this.store.equalizer_gains;
@@ -460,11 +532,9 @@ fn bands_section(
         )
 }
 
-fn level_indicator(gain: f32, enabled: bool) -> Div {
-    // gain is -12.0 to +12.0
-    // Visual track of height 64px, center line at 32px
+fn level_indicator(gain: f32, enabled: bool, is_light: bool) -> Div {
     let clamped = gain.clamp(-12.0, 12.0);
-    let ratio = clamped / 12.0; // -1.0 to +1.0
+    let ratio = clamped / 12.0;
     let bar_height = (ratio.abs() * 26.0).max(2.0);
     let is_pos = ratio >= 0.0;
 
@@ -472,9 +542,9 @@ fn level_indicator(gain: f32, enabled: bool) -> Div {
         .w(px(14.0))
         .h(px(60.0))
         .rounded_md()
-        .bg(c(0x0E0F14))
+        .bg(if is_light { c(0xEDEAEF) } else { c(0x0E0F14) })
         .border(px(1.0))
-        .border_color(c(0x20232B))
+        .border_color(if is_light { c(0xDCDEE2) } else { c(0x20232B) })
         .relative()
         .overflow_hidden()
         // Center zero line
@@ -485,7 +555,7 @@ fn level_indicator(gain: f32, enabled: bool) -> Div {
                 .right_0()
                 .top(px(29.0))
                 .h(px(2.0))
-                .bg(c(0x353945)),
+                .bg(if is_light { c(0x9CA3AF) } else { c(0x353945) }),
         )
         // Active bar
         .child(
@@ -502,13 +572,15 @@ fn level_indicator(gain: f32, enabled: bool) -> Div {
                 .rounded_sm()
                 .bg(if enabled && clamped.abs() > 0.1 {
                     red()
+                } else if is_light {
+                    c(0x9CA3AF)
                 } else {
                     c(0x3B3F4C)
                 }),
         )
 }
 
-fn modal_footer() -> Div {
+fn modal_footer(is_light: bool) -> Div {
     h_flex()
         .w_full()
         .items_center()
@@ -516,35 +588,64 @@ fn modal_footer() -> Div {
         .px(px(20.0))
         .py(px(10.0))
         .border_t(px(1.0))
-        .border_color(c(0x1C1F26))
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x1C1F26) })
         .child(
             div()
                 .text_xs()
-                .text_color(white(0.4))
+                .text_color(if is_light { c(0x71717A) } else { white(0.4) })
                 .child("Real-time biquad audio engine"),
         )
         .child(
             h_flex()
                 .items_center()
-                .gap(px(5.0))
+                .gap(px(8.0))
                 .child(
-                    div()
-                        .px(px(6.0))
-                        .py(px(1.0))
-                        .rounded_md()
-                        .bg(c(0x1E2028))
-                        .border(px(1.0))
-                        .border_color(c(0x2A2D38))
-                        .text_xs()
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(white(0.65))
-                        .child("Escape"),
+                    h_flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .px(px(6.0))
+                                .py(px(1.0))
+                                .rounded_md()
+                                .bg(if is_light { c(0xF0F1F3) } else { c(0x1E2028) })
+                                .border(px(1.0))
+                                .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D38) })
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(if is_light { c(0x3F3F46) } else { white(0.65) })
+                                .child("Ctrl + E"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(if is_light { c(0x71717A) } else { white(0.4) })
+                                .child("toggle"),
+                        ),
                 )
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(white(0.4))
-                        .child("to close"),
+                    h_flex()
+                        .items_center()
+                        .gap(px(4.0))
+                        .child(
+                            div()
+                                .px(px(6.0))
+                                .py(px(1.0))
+                                .rounded_md()
+                                .bg(if is_light { c(0xF0F1F3) } else { c(0x1E2028) })
+                                .border(px(1.0))
+                                .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D38) })
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(if is_light { c(0x3F3F46) } else { white(0.65) })
+                                .child("Escape"),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(if is_light { c(0x71717A) } else { white(0.4) })
+                                .child("close"),
+                        ),
                 ),
         )
 }

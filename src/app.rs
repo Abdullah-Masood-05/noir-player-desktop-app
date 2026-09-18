@@ -98,6 +98,7 @@ pub struct NoirPlayerModel {
     discover_downloads: Vec<Track>,
     pub settings_open: bool,
     pub equalizer_open: bool,
+    pub root_focus_handle: FocusHandle,
     pub settings_focus_handle: FocusHandle,
     pub equalizer_focus_handle: FocusHandle,
     pub settings_category: crate::views::settings::SettingsCategory,
@@ -185,6 +186,7 @@ impl NoirPlayerModel {
             discover_downloads: Vec::new(),
             settings_open: false,
             equalizer_open: false,
+            root_focus_handle: cx.focus_handle(),
             settings_focus_handle: cx.focus_handle(),
             equalizer_focus_handle: cx.focus_handle(),
             settings_category: crate::views::settings::SettingsCategory::All,
@@ -304,6 +306,11 @@ impl NoirPlayerModel {
                 cached.track.title == source.name && cached.track.artist == source.artist
             })
             .map(|cached| cached.track.path.clone());
+        let download_folder = if download {
+            Some(self.effective_download_folder())
+        } else {
+            None
+        };
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -312,6 +319,7 @@ impl NoirPlayerModel {
                         &source,
                         download,
                         cached.as_deref(),
+                        download_folder.as_deref(),
                         &cancel,
                         &|message| {
                             if let Ok(mut value) = progress.lock() {
@@ -378,18 +386,19 @@ impl NoirPlayerModel {
         if self.scanning {
             return;
         }
-        let Some(folder) = media::default_music_folder() else {
+        let folders = self.effective_music_folders();
+        if folders.is_empty() {
             self.status = "Music folder unavailable".into();
-            self.error = Some("Could not locate the system Music folder".into());
+            self.error = Some("Could not locate any configured music folders or the system Music folder".into());
             cx.notify();
             return;
-        };
+        }
         self.scanning = true;
-        self.status = "Scanning Music folder...".into();
+        self.status = "Scanning music folders...".into();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { media::scan_folder(&folder) })
+                .spawn(async move { media::scan_folders(&folders) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.scanning = false;
@@ -556,6 +565,93 @@ impl NoirPlayerModel {
             self.equalizer_open = false;
         }
         cx.notify();
+    }
+
+    pub fn effective_music_folders(&self) -> Vec<PathBuf> {
+        let mut folders = self.store.all_music_folders();
+        if folders.is_empty() {
+            if let Some(default_folder) = media::default_music_folder() {
+                folders.push(default_folder);
+            }
+        }
+        folders
+    }
+
+    pub fn effective_download_folder(&self) -> PathBuf {
+        if let Some(folder) = self.store.download_folder.as_ref() {
+            if folder.is_dir() {
+                return folder.clone();
+            }
+        }
+        media::default_music_folder().unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    pub fn add_music_folder(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await {
+                if let Some(path) = paths.into_iter().next() {
+                    let _ = this.update(cx, |this, cx| {
+                        if !this.store.music_folders.contains(&path) {
+                            let mut next = this.store.clone();
+                            next.music_folders.push(path);
+                            this.save_store(next, cx);
+                            this.rescan(cx);
+                        }
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub fn remove_music_folder(&mut self, folder: &std::path::Path, cx: &mut Context<Self>) {
+        let mut next = self.store.clone();
+        next.music_folders.retain(|p| p != folder);
+        if next.music_folder.as_deref() == Some(folder) {
+            next.music_folder = None;
+        }
+        self.save_store(next, cx);
+        self.rescan(cx);
+    }
+
+    pub fn change_download_folder(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await {
+                if let Some(path) = paths.into_iter().next() {
+                    let _ = this.update(cx, |this, cx| {
+                        let mut next = this.store.clone();
+                        next.download_folder = Some(path);
+                        this.save_store(next, cx);
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub fn reset_download_folder(&mut self, cx: &mut Context<Self>) {
+        let mut next = self.store.clone();
+        next.download_folder = None;
+        self.save_store(next, cx);
+    }
+
+    pub fn set_theme_mode(&mut self, mode: &str, cx: &mut Context<Self>) {
+        let mut next = self.store.clone();
+        next.theme_mode = mode.to_string();
+        crate::views::ui::apply_theme(mode, cx);
+        self.save_store(next, cx);
     }
 
     pub fn open_equalizer(&mut self, cx: &mut Context<Self>) {
@@ -980,30 +1076,54 @@ impl Render for NoirPlayerModel {
             if !search_focused && !self.settings_focus_handle.is_focused(window) {
                 window.focus(&self.settings_focus_handle, cx);
             }
+        } else {
+            let lib_search_focused = self
+                .library_search
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
+            let disc_search_focused = self
+                .discover_search
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window);
+            if !lib_search_focused
+                && !disc_search_focused
+                && !self.root_focus_handle.is_focused(window)
+            {
+                window.focus(&self.root_focus_handle, cx);
+            }
         }
 
         v_flex()
             .id("app-root")
+            .track_focus(&self.root_focus_handle)
             .size_full()
             .min_h_0()
             .overflow_hidden()
             .relative()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .when(self.settings_open || self.equalizer_open, |d| {
-                d.on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    let k = event.keystroke.key.trim();
-                    if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                let k = event.keystroke.key.trim();
+                let ctrl_or_cmd =
+                    event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+                if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
+                    if this.equalizer_open {
+                        this.close_equalizer(cx);
                         cx.stop_propagation();
-                        if this.equalizer_open {
-                            this.close_equalizer(cx);
-                        }
-                        if this.settings_open {
-                            this.close_settings(cx);
-                        }
+                    } else if this.settings_open {
+                        this.close_settings(cx);
+                        cx.stop_propagation();
                     }
-                }))
-            })
+                } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
+                    this.toggle_settings(cx);
+                    cx.stop_propagation();
+                } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
+                    this.toggle_equalizer(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .child(
                 v_flex()
                     .flex_1()

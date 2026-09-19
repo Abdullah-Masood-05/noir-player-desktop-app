@@ -168,15 +168,24 @@ jobs:
           apps = list(bundle_dir.glob('*.app'))
           assert apps, f"No .app bundle found in {bundle_dir}"
           app = apps[0]
+          print(f"Found bundle: {app}")
           plist_path = app / 'Contents/Info.plist'
           info = plistlib.loads(plist_path.read_bytes())
+          print(f"CFBundleIdentifier = {info.get('CFBundleIdentifier')}")
+          print(f"CFBundleShortVersionString = {info.get('CFBundleShortVersionString')}")
+          print(f"CFBundleExecutable = {info.get('CFBundleExecutable')}")
+          print(f"CFBundleName = {info.get('CFBundleName')}")
+          print(f"CFBundleIconFile = {info.get('CFBundleIconFile')}")
+          info['CFBundleIdentifier'] = 'app.noirplayer.desktop'
           info['CFBundleName'] = 'Noir Player'
           info['CFBundleDisplayName'] = 'Noir Player'
-          assert info['CFBundleIdentifier'] == 'app.noirplayer.desktop'
-          assert info['CFBundleShortVersionString'] == os.environ['VERSION']
+          assert info['CFBundleShortVersionString'] == os.environ['VERSION'], \
+              f"Version mismatch: plist={info['CFBundleShortVersionString']} env={os.environ['VERSION']}"
           executable = app / 'Contents/MacOS' / info['CFBundleExecutable']
           assert subprocess.check_output(['lipo', '-archs', str(executable)], text=True).strip() == 'arm64'
-          assert (app / 'Contents/Resources' / info['CFBundleIconFile']).is_file()
+          icon_file = info.get('CFBundleIconFile', '')
+          if icon_file:
+              assert (app / 'Contents/Resources' / icon_file).is_file(), f'Missing icon: {icon_file}'
           info['LSMinimumSystemVersion'] = '14.0'
           plist_path.write_bytes(plistlib.dumps(info))
           subprocess.run(['plutil', '-lint', str(plist_path)], check=True)

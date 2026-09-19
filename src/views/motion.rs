@@ -2,7 +2,6 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::InteractiveElementExt;
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 pub fn tab_transition(id: impl Into<ElementId>, content: impl IntoElement) -> AnyElement {
@@ -131,7 +130,6 @@ struct ScrollMotion {
     target: Option<f32>,
     last_offset: f32,
     last_frame: Option<Instant>,
-    scrolling_until: Option<Instant>,
 }
 
 fn clamp_offset(offset: f32, maximum: f32) -> f32 {
@@ -148,11 +146,6 @@ fn approach(current: f32, target: f32, elapsed: f32) -> f32 {
 }
 
 impl ScrollMotion {
-    fn is_scrolling(&self) -> bool {
-        self.scrolling_until
-            .is_some_and(|until| Instant::now() < until)
-    }
-
     fn advance(&mut self, reduced: bool) -> bool {
         let Some(target) = self.target else {
             return false;
@@ -178,9 +171,6 @@ impl ScrollMotion {
         self.last_offset = next;
         self.last_frame = Some(now);
         self.target = (next != target).then_some(target);
-        if self.target.is_some() {
-            self.scrolling_until = Some(now + Duration::from_millis(600));
-        }
         self.target.is_some()
     }
 }
@@ -194,7 +184,6 @@ impl RenderOnce for SmoothScroll {
         if state.update(cx, |state, _| state.advance(reduced)) {
             window.request_animation_frame();
         }
-        let is_scrolling = state.read(cx).is_scrolling();
         let handle = state.read(cx).handle.clone();
         let cancel = state.clone();
         div()
@@ -250,8 +239,6 @@ impl RenderOnce for SmoothScroll {
                                     state.target = (target != current).then_some(target);
                                     state.last_offset = current;
                                     state.last_frame = Some(Instant::now());
-                                    state.scrolling_until =
-                                        Some(Instant::now() + Duration::from_millis(700));
                                     cx.stop_propagation();
                                     cx.notify();
                                 });
@@ -266,33 +253,6 @@ impl RenderOnce for SmoothScroll {
                         .viewport_from_layout(),
                 ),
             )
-            .when(is_scrolling, |d| {
-                d.child(
-                    div().absolute().bottom(px(14.0)).right(px(18.0)).child(
-                        div()
-                            .px(px(10.0))
-                            .py(px(4.0))
-                            .rounded_full()
-                            .bg(super::red_a(0.90))
-                            .shadow(vec![BoxShadow::new(px(0.0), px(4.0), super::red_a(0.4))
-                                .blur_radius(px(12.0))])
-                            .text_color(super::white(1.0))
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .flex()
-                            .items_center()
-                            .gap(px(5.0))
-                            .with_animation(
-                                (self.id, "bubble-pop-badge"),
-                                Animation::new(Duration::from_millis(200))
-                                    .with_easing(bubbly_spring),
-                                move |el, progress| el.opacity(progress.clamp(0.0, 1.0)),
-                            )
-                            .child(super::icon_text(gpui_kit::assets::IconName::RotateCw, 11.0))
-                            .child("Scrolling"),
-                    ),
-                )
-            })
     }
 }
 

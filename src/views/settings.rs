@@ -414,6 +414,32 @@ fn build_rows(
                 .into_any_element(),
         );
         idx += 1;
+
+        let vol_pct = (model.volume * 100.0).round() as u32;
+        let active = idx == selected;
+        rows.push(
+            row_base(idx, active, is_light, cx)
+                .justify_between()
+                .child(label_cell(
+                    "Volume",
+                    "Playback audio output volume (controllable with Up / Down arrow keys)",
+                    is_light,
+                ))
+                .child(stepper(
+                    "vol-step",
+                    &format!("{vol_pct}%"),
+                    is_light,
+                    cx,
+                    |this, _, _, cx| {
+                        this.adjust_volume(-0.05, cx);
+                    },
+                    |this, _, _, cx| {
+                        this.adjust_volume(0.05, cx);
+                    },
+                ))
+                .into_any_element(),
+        );
+        idx += 1;
     }
 
     // ── Appearance rows ─────────────────────────────────────────────────────────

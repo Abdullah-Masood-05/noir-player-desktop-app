@@ -223,8 +223,114 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                         }))
                                         .child(icon_text(MusicIcon::Repeat, 20.0)),
                                 ),
-                        ),
+                        )
+                        .child(volume_control_row(model.volume, is_light, cx)),
                 ),
+        )
+}
+
+fn volume_control_row(volume: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
+    let pct = (volume * 100.0).round() as u32;
+    let icon = if volume == 0.0 {
+        MusicIcon::VolumeX
+    } else if volume < 0.5 {
+        MusicIcon::Volume1
+    } else {
+        MusicIcon::Volume2
+    };
+
+    h_flex()
+        .w_full()
+        .items_center()
+        .justify_center()
+        .gap(px(10.0))
+        .pt(px(4.0))
+        .child(
+            div()
+                .id("player-mute-toggle")
+                .size(px(32.0))
+                .rounded_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .text_color(if volume == 0.0 {
+                    red()
+                } else {
+                    dynamic_subtitle(is_light)
+                })
+                .hover(move |s| {
+                    s.bg(dynamic_hover(is_light))
+                        .text_color(dynamic_text(is_light))
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if this.volume > 0.0 {
+                        this.set_volume(0.0, cx);
+                    } else {
+                        this.set_volume(0.9, cx);
+                    }
+                }))
+                .child(icon_text(icon, 18.0)),
+        )
+        .child(
+            div()
+                .id("player-vol-down")
+                .size(px(28.0))
+                .rounded_lg()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .text_color(dynamic_subtitle(is_light))
+                .hover(move |s| {
+                    s.bg(dynamic_hover(is_light))
+                        .text_color(dynamic_text(is_light))
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.adjust_volume(-0.05, cx);
+                }))
+                .child("−"),
+        )
+        .child(
+            div()
+                .id("player-vol-track")
+                .w(px(160.0))
+                .h(px(6.0))
+                .rounded_full()
+                .bg(red_a(0.18))
+                .overflow_hidden()
+                .child(div().h_full().bg(red()).rounded_full().w(relative(volume))),
+        )
+        .child(
+            div()
+                .id("player-vol-up")
+                .size(px(28.0))
+                .rounded_lg()
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .text_sm()
+                .font_weight(FontWeight::BOLD)
+                .text_color(dynamic_subtitle(is_light))
+                .hover(move |s| {
+                    s.bg(dynamic_hover(is_light))
+                        .text_color(dynamic_text(is_light))
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.adjust_volume(0.05, cx);
+                }))
+                .child("+"),
+        )
+        .child(
+            div()
+                .w(px(40.0))
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(dynamic_subtitle(is_light))
+                .child(format!("{pct}%")),
         )
 }
 

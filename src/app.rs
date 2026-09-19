@@ -111,6 +111,7 @@ pub struct NoirPlayerModel {
     pub settings_category: crate::views::settings::SettingsCategory,
     pub settings_search: Entity<InputState>,
     pub settings_selected_index: usize,
+    pub volume_hud_until: Option<std::time::Instant>,
     _subscriptions: Vec<Subscription>,
     dialog_subscription: Option<Subscription>,
 }
@@ -147,7 +148,9 @@ impl NoirPlayerModel {
             }),
             cx.subscribe(&settings_search, |_, _, _: &InputEvent, cx| cx.notify()),
         ];
+        let volume = store.volume;
         if let Some(player) = player.as_ref() {
+            player.set_volume(volume);
             player.set_equalizer_enabled(store.equalizer_enabled);
             player.set_equalizer_gains(store.equalizer_gains);
         }
@@ -178,7 +181,8 @@ impl NoirPlayerModel {
             player,
             status: "Loading library...".into(),
             scanning: false,
-            volume: 0.9,
+            volume,
+            volume_hud_until: None,
             shuffle: false,
             repeat_all: true,
             discover_search,
@@ -713,6 +717,31 @@ impl NoirPlayerModel {
         }
     }
 
+    pub fn set_volume(&mut self, volume: f32, cx: &mut Context<Self>) {
+        let volume = volume.clamp(0.0, 1.0);
+        self.volume = volume;
+        self.store.volume = volume;
+        if let Some(player) = self.player.as_ref() {
+            player.set_volume(volume);
+        }
+        self.volume_hud_until = Some(std::time::Instant::now() + Duration::from_millis(1500));
+        self.save_current_store(cx);
+        cx.spawn(async move |this, cx| {
+            smol::Timer::after(Duration::from_millis(1550)).await;
+            let _ = this.update(cx, |_, cx| {
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub fn adjust_volume(&mut self, delta: f32, cx: &mut Context<Self>) {
+        let next = (self.volume + delta).clamp(0.0, 1.0);
+        let rounded = (next * 20.0).round() / 20.0;
+        self.set_volume(rounded, cx);
+    }
+
     pub fn toggle_favourite(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(track) = self.tracks.get(index) else {
             return;
@@ -1119,6 +1148,11 @@ impl Render for NoirPlayerModel {
             }
         }
 
+        let show_volume_hud = self
+            .volume_hud_until
+            .is_some_and(|until| std::time::Instant::now() < until);
+        let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
+
         v_flex()
             .id("app-root")
             .track_focus(&self.root_focus_handle)
@@ -1128,10 +1162,29 @@ impl Render for NoirPlayerModel {
             .relative()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let is_typing = this
+                    .library_search
+                    .read(cx)
+                    .focus_handle(cx)
+                    .is_focused(window)
+                    || this
+                        .discover_search
+                        .read(cx)
+                        .focus_handle(cx)
+                        .is_focused(window)
+                    || this
+                        .settings_search
+                        .read(cx)
+                        .focus_handle(cx)
+                        .is_focused(window);
+
                 let k = event.keystroke.key.trim();
                 let ctrl_or_cmd =
                     event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+                let shift = event.keystroke.modifiers.shift;
+                let alt = event.keystroke.modifiers.alt;
+
                 if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
                     if this.equalizer_open {
                         this.close_equalizer(cx);
@@ -1146,6 +1199,40 @@ impl Render for NoirPlayerModel {
                 } else if ctrl_or_cmd && k.eq_ignore_ascii_case("e") {
                     this.toggle_equalizer(cx);
                     cx.stop_propagation();
+                } else if !is_typing
+                    && !ctrl_or_cmd
+                    && !alt
+                    && !this.settings_open
+                    && !this.equalizer_open
+                {
+                    if k.eq_ignore_ascii_case("p") || k == " " || k.eq_ignore_ascii_case("space") {
+                        this.toggle_play(cx);
+                        cx.stop_propagation();
+                    } else if k.eq_ignore_ascii_case("arrowright")
+                        || k.eq_ignore_ascii_case("right")
+                    {
+                        if shift {
+                            this.next(cx);
+                        } else {
+                            this.skip_forward(cx);
+                        }
+                        cx.stop_propagation();
+                    } else if k.eq_ignore_ascii_case("arrowleft") || k.eq_ignore_ascii_case("left")
+                    {
+                        if shift {
+                            this.prev(cx);
+                        } else {
+                            this.skip_backward(cx);
+                        }
+                        cx.stop_propagation();
+                    } else if k.eq_ignore_ascii_case("arrowup") || k.eq_ignore_ascii_case("up") {
+                        this.adjust_volume(0.05, cx);
+                        cx.stop_propagation();
+                    } else if k.eq_ignore_ascii_case("arrowdown") || k.eq_ignore_ascii_case("down")
+                    {
+                        this.adjust_volume(-0.05, cx);
+                        cx.stop_propagation();
+                    }
                 }
             }))
             .child(
@@ -1210,5 +1297,84 @@ impl Render for NoirPlayerModel {
             .when(self.settings_open, |d| {
                 d.child(crate::views::settings::render_settings_modal(self, cx))
             })
+            .when(show_volume_hud, |d| {
+                d.child(volume_hud(self.volume, is_light))
+            })
     }
+}
+
+fn c(hex: u32) -> Hsla {
+    rgb(hex).into()
+}
+
+fn volume_hud(volume: f32, is_light: bool) -> Div {
+    let pct = (volume * 100.0).round() as u32;
+    let icon = if volume == 0.0 {
+        gpui_kit::assets::IconName::VolumeX
+    } else if volume < 0.5 {
+        gpui_kit::assets::IconName::Volume1
+    } else {
+        gpui_kit::assets::IconName::Volume2
+    };
+
+    div()
+        .absolute()
+        .top(px(24.0))
+        .left_0()
+        .right_0()
+        .flex()
+        .justify_center()
+        .child(
+            h_flex()
+                .items_center()
+                .gap(px(12.0))
+                .px(px(16.0))
+                .py(px(8.0))
+                .rounded_full()
+                .bg(if is_light { c(0xFFFFFF) } else { c(0x181A20) })
+                .border(px(1.0))
+                .border_color(if is_light { c(0xE4E4E7) } else { c(0x2E323D) })
+                .shadow(vec![BoxShadow::new(
+                    px(0.0),
+                    px(8.0),
+                    hsla(0.0, 0.0, 0.0, 0.35),
+                )
+                .blur_radius(px(20.0))])
+                .child(
+                    div()
+                        .text_color(if is_light {
+                            c(0x18181B)
+                        } else {
+                            crate::views::ui::white(0.9)
+                        })
+                        .child(crate::views::ui::icon_text(icon, 18.0)),
+                )
+                .child(
+                    div()
+                        .w(px(110.0))
+                        .h(px(6.0))
+                        .rounded_full()
+                        .bg(if is_light { c(0xE5E7EB) } else { c(0x282C37) })
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .h_full()
+                                .bg(crate::views::ui::red())
+                                .rounded_full()
+                                .w(relative(volume)),
+                        ),
+                )
+                .child(
+                    div()
+                        .w(px(38.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(if is_light {
+                            c(0x18181B)
+                        } else {
+                            crate::views::ui::white(1.0)
+                        })
+                        .child(format!("{pct}%")),
+                ),
+        )
 }

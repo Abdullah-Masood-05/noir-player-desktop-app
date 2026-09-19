@@ -31,6 +31,8 @@ pub struct Store {
     pub download_folder: Option<PathBuf>,
     #[serde(default = "default_resume_last_song")]
     pub resume_last_song: bool,
+    #[serde(default = "default_volume")]
+    pub volume: f32,
 }
 
 fn default_seek_interval() -> u32 {
@@ -53,6 +55,10 @@ fn default_resume_last_song() -> bool {
     true
 }
 
+fn default_volume() -> f32 {
+    0.9
+}
+
 impl Default for Store {
     fn default() -> Self {
         Self {
@@ -67,6 +73,7 @@ impl Default for Store {
             music_folders: Vec::new(),
             download_folder: None,
             resume_last_song: true,
+            volume: 0.9,
         }
     }
 }

@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::InteractiveElementExt;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 pub fn tab_transition(id: impl Into<ElementId>, content: impl IntoElement) -> AnyElement {
@@ -58,8 +59,45 @@ pub fn backdrop_transition(id: impl Into<ElementId>, content: impl IntoElement) 
         .into_any_element()
 }
 
+pub fn bubbly_spring(t: f32) -> f32 {
+    if t <= 0.0 {
+        0.0
+    } else if t >= 1.0 {
+        1.0
+    } else {
+        let s = 1.70158;
+        let t = t - 1.0;
+        t * t * ((s + 1.0) * t + s) + 1.0
+    }
+}
+
+#[allow(dead_code)]
+pub fn bubbly_pop(t: f32) -> f32 {
+    if t <= 0.0 {
+        0.0
+    } else if t >= 1.0 {
+        1.0
+    } else {
+        let decay = (-5.5 * t).exp();
+        1.0 - decay * (t * std::f32::consts::PI * 3.0).cos()
+    }
+}
+
 fn ease_out_quint(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(5)
+}
+
+#[allow(dead_code)]
+pub fn bubble_pop_item(id: impl Into<ElementId>, content: impl IntoElement) -> AnyElement {
+    div()
+        .w_full()
+        .child(content)
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(220)).with_easing(bubbly_spring),
+            move |element, progress| element.opacity(progress.clamp(0.0, 1.0)),
+        )
+        .into_any_element()
 }
 
 pub fn selected_highlight(id: impl Into<ElementId>, selected: bool, element: Div) -> AnyElement {
@@ -93,6 +131,7 @@ struct ScrollMotion {
     target: Option<f32>,
     last_offset: f32,
     last_frame: Option<Instant>,
+    scrolling_until: Option<Instant>,
 }
 
 fn clamp_offset(offset: f32, maximum: f32) -> f32 {
@@ -109,6 +148,11 @@ fn approach(current: f32, target: f32, elapsed: f32) -> f32 {
 }
 
 impl ScrollMotion {
+    fn is_scrolling(&self) -> bool {
+        self.scrolling_until
+            .is_some_and(|until| Instant::now() < until)
+    }
+
     fn advance(&mut self, reduced: bool) -> bool {
         let Some(target) = self.target else {
             return false;
@@ -134,6 +178,9 @@ impl ScrollMotion {
         self.last_offset = next;
         self.last_frame = Some(now);
         self.target = (next != target).then_some(target);
+        if self.target.is_some() {
+            self.scrolling_until = Some(now + Duration::from_millis(600));
+        }
         self.target.is_some()
     }
 }
@@ -147,6 +194,7 @@ impl RenderOnce for SmoothScroll {
         if state.update(cx, |state, _| state.advance(reduced)) {
             window.request_animation_frame();
         }
+        let is_scrolling = state.read(cx).is_scrolling();
         let handle = state.read(cx).handle.clone();
         let cancel = state.clone();
         div()
@@ -202,6 +250,8 @@ impl RenderOnce for SmoothScroll {
                                     state.target = (target != current).then_some(target);
                                     state.last_offset = current;
                                     state.last_frame = Some(Instant::now());
+                                    state.scrolling_until =
+                                        Some(Instant::now() + Duration::from_millis(700));
                                     cx.stop_propagation();
                                     cx.notify();
                                 });
@@ -212,16 +262,43 @@ impl RenderOnce for SmoothScroll {
             .child(
                 div().absolute().inset_0().child(
                     Scrollbar::vertical(&handle)
-                        .id((self.id, "scrollbar"))
+                        .id((self.id.clone(), "scrollbar"))
                         .viewport_from_layout(),
                 ),
             )
+            .when(is_scrolling, |d| {
+                d.child(
+                    div().absolute().bottom(px(14.0)).right(px(18.0)).child(
+                        div()
+                            .px(px(10.0))
+                            .py(px(4.0))
+                            .rounded_full()
+                            .bg(super::red_a(0.90))
+                            .shadow(vec![BoxShadow::new(px(0.0), px(4.0), super::red_a(0.4))
+                                .blur_radius(px(12.0))])
+                            .text_color(super::white(1.0))
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .flex()
+                            .items_center()
+                            .gap(px(5.0))
+                            .with_animation(
+                                (self.id, "bubble-pop-badge"),
+                                Animation::new(Duration::from_millis(200))
+                                    .with_easing(bubbly_spring),
+                                move |el, progress| el.opacity(progress.clamp(0.0, 1.0)),
+                            )
+                            .child(super::icon_text(gpui_kit::assets::IconName::RotateCw, 11.0))
+                            .child("Scrolling"),
+                    ),
+                )
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{approach, clamp_offset};
+    use super::{approach, bubbly_pop, bubbly_spring, clamp_offset};
 
     #[test]
     fn offsets_stay_inside_content() {
@@ -245,5 +322,14 @@ mod tests {
         assert!(approach(-80.0, -20.0, 0.016) <= -20.0);
         assert_eq!(approach(-20.1, -20.0, 0.016), -20.0);
         assert_eq!(approach(0.0, -100.0, 10.0), -100.0);
+    }
+
+    #[test]
+    fn bubbly_spring_and_pop_start_and_finish_properly() {
+        assert_eq!(bubbly_spring(0.0), 0.0);
+        assert_eq!(bubbly_spring(1.0), 1.0);
+        assert!(bubbly_spring(0.8) > 1.0); // overshoots like a bubble
+        assert_eq!(bubbly_pop(0.0), 0.0);
+        assert_eq!(bubbly_pop(1.0), 1.0);
     }
 }

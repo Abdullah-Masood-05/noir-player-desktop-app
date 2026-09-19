@@ -12,6 +12,10 @@ use crate::views::ui::{
     img_from_bytes, red, red_a, selected_highlight, smooth_scroll, tab_transition, top_fade, white,
 };
 
+fn c(hex: u32) -> Hsla {
+    rgb(hex).into()
+}
+
 pub fn app_bar(title: &str, is_light: bool) -> Div {
     h_flex()
         .w_full()
@@ -243,6 +247,10 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
             LibraryTab::Music | LibraryTab::Favourites => {
                 let indices = if tab == LibraryTab::Favourites {
                     store::resolve_paths(&model.store.favourites, &model.tracks)
+                } else if let Some(folder) = model.selected_folder_filter.as_ref() {
+                    (0..model.tracks.len())
+                        .filter(|&i| model.tracks[i].path.starts_with(folder))
+                        .collect()
                 } else {
                     (0..model.tracks.len()).collect()
                 };
@@ -330,6 +338,84 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                     .into_any_element()
                 }
             }
+            LibraryTab::Folders => {
+                let folders = model.effective_music_folders();
+                let visible: Vec<_> = folders
+                    .into_iter()
+                    .map(|f| {
+                        let count = model
+                            .tracks
+                            .iter()
+                            .filter(|t| t.path.starts_with(&f))
+                            .count();
+                        (f, count)
+                    })
+                    .collect();
+                if visible.is_empty() {
+                    empty_state(
+                        "No folders configured",
+                        "Add music folders in Settings (Ctrl+,).",
+                        is_light,
+                    )
+                    .into_any_element()
+                } else {
+                    smooth_scroll(
+                        "folders-scroll",
+                        div().child(h_flex().flex_wrap().gap(px(18.0)).p(px(14.0)).children(
+                            visible.into_iter().map(|(folder, count)| {
+                                let folder_clone = folder.clone();
+                                let name = folder
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("Folder")
+                                    .to_string();
+                                let path_str = folder.display().to_string();
+                                v_flex()
+                                    .id(format!("folder-card-{path_str}"))
+                                    .w(px(150.0))
+                                    .items_center()
+                                    .gap(px(6.0))
+                                    .cursor_pointer()
+                                    .hover(|s| s.opacity(0.85))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.library_detail =
+                                            Some(Collection::Folder(folder_clone.clone()));
+                                        cx.notify();
+                                    }))
+                                    .child(
+                                        div()
+                                            .size(px(120.0))
+                                            .rounded_2xl()
+                                            .bg(red_a(0.12))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .text_color(red())
+                                            .child(icon_text(MusicIcon::Folder, 60.0)),
+                                    )
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .text_sm()
+                                            .text_center()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(dynamic_text(is_light))
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .child(name),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(dynamic_subtitle(is_light))
+                                            .child(format!("{count} songs")),
+                                    )
+                            }),
+                        )),
+                    )
+                    .into_any_element()
+                }
+            }
         }
     };
     v_flex()
@@ -361,6 +447,12 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                     )
                 })
                 .child(search_bar(model))
+                .when(
+                    tab == LibraryTab::Music
+                        && detail.is_none()
+                        && model.effective_music_folders().len() > 1,
+                    |d| d.child(folder_filter_bar(model, is_light, cx)),
+                )
                 .child(
                     h_flex()
                         .flex_shrink_0()
@@ -392,12 +484,86 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
         )
 }
 
+fn folder_filter_bar(
+    model: &NoirPlayerModel,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Div {
+    let folders = model.effective_music_folders();
+    let current_filter = model.selected_folder_filter.clone();
+    h_flex()
+        .w_full()
+        .flex_shrink_0()
+        .px(px(12.0))
+        .pb(px(8.0))
+        .gap(px(6.0))
+        .items_center()
+        .overflow_x_hidden()
+        .child(
+            div()
+                .id("folder-filter-all")
+                .px(px(10.0))
+                .py(px(4.0))
+                .rounded_full()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .cursor_pointer()
+                .when(current_filter.is_none(), |d| {
+                    d.bg(red()).text_color(white(1.0))
+                })
+                .when(current_filter.is_some(), |d| {
+                    d.bg(if is_light { c(0xEDEAEF) } else { c(0x1F2228) })
+                        .text_color(dynamic_subtitle(is_light))
+                        .hover(move |s| s.bg(dynamic_hover(is_light)))
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.selected_folder_filter = None;
+                    cx.notify();
+                }))
+                .child(format!("All ({})", model.tracks.len())),
+        )
+        .children(folders.into_iter().map(|f| {
+            let count = model
+                .tracks
+                .iter()
+                .filter(|t| t.path.starts_with(&f))
+                .count();
+            let name = f
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Folder")
+                .to_string();
+            let is_selected = current_filter.as_ref() == Some(&f);
+            let f_clone = f.clone();
+            div()
+                .id(format!("filter-folder-{}", f.display()))
+                .px(px(10.0))
+                .py(px(4.0))
+                .rounded_full()
+                .text_xs()
+                .font_weight(FontWeight::SEMIBOLD)
+                .cursor_pointer()
+                .when(is_selected, |d| d.bg(red()).text_color(white(1.0)))
+                .when(!is_selected, |d| {
+                    d.bg(if is_light { c(0xEDEAEF) } else { c(0x1F2228) })
+                        .text_color(dynamic_subtitle(is_light))
+                        .hover(move |s| s.bg(dynamic_hover(is_light)))
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.selected_folder_filter = Some(f_clone.clone());
+                    cx.notify();
+                }))
+                .child(format!("{name} ({count})"))
+        }))
+}
+
 pub fn tab_bar(active: LibraryTab, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
     let tabs = [
         (LibraryTab::Music, "Music"),
         (LibraryTab::Favourites, "Favourites"),
         (LibraryTab::Albums, "Albums"),
         (LibraryTab::Artists, "Artists"),
+        (LibraryTab::Folders, "Folders"),
     ];
     let unselected_color = dynamic_subtitle(is_light);
     h_flex()

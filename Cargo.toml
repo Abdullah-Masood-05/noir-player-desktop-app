@@ -56,6 +56,9 @@ long_description = "Noir Player is a desktop music player with a local library, 
 osx_minimum_system_version = "14.0"
 linux_use_terminal = false
 
+[package.metadata.bundle.bin.noir_player]
+name = "Noir Player"
+
 [profile.dev.package]
 gpui-pre = { opt-level = 3 }
 gpui-component = { opt-level = 3 }

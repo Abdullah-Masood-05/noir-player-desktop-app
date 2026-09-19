@@ -164,9 +164,14 @@ jobs:
           import pathlib
           import plistlib
           import subprocess
-          app = pathlib.Path('target') / os.environ['TARGET'] / 'release/bundle/osx/Noir Player.app'
+          bundle_dir = pathlib.Path('target') / os.environ['TARGET'] / 'release/bundle/osx'
+          apps = list(bundle_dir.glob('*.app'))
+          assert apps, f"No .app bundle found in {bundle_dir}"
+          app = apps[0]
           plist_path = app / 'Contents/Info.plist'
           info = plistlib.loads(plist_path.read_bytes())
+          info['CFBundleName'] = 'Noir Player'
+          info['CFBundleDisplayName'] = 'Noir Player'
           assert info['CFBundleIdentifier'] == 'app.noirplayer.desktop'
           assert info['CFBundleShortVersionString'] == os.environ['VERSION']
           executable = app / 'Contents/MacOS' / info['CFBundleExecutable']
@@ -226,10 +231,17 @@ jobs:
           desktop.unlink()
           desktop = desktop.with_name(f'{app_id}.desktop')
           desktop.write_text(text + f'StartupWMClass={app_id}\n')
-          icons = list((staging / 'usr/share/icons/hicolor').glob('*/apps/noir_player.png'))
-          assert icons, 'Missing desktop PNG icon'
-          for icon in icons:
-              icon.rename(icon.with_name(f'{app_id}.png'))
+          icons = list((staging / 'usr/share/icons').rglob('*.png'))
+          if not icons:
+              icon_dir = staging / 'usr/share/icons/hicolor/256x256/apps'
+              icon_dir.mkdir(parents=True, exist_ok=True)
+              import shutil
+              shutil.copyfile('Noir_Player_Logo.png', icon_dir / f'{app_id}.png')
+              icons = [icon_dir / f'{app_id}.png']
+          else:
+              for icon in icons:
+                  if icon.name != f'{app_id}.png':
+                      icon.rename(icon.with_name(f'{app_id}.png'))
           subprocess.run(['desktop-file-validate', str(desktop)], check=True)
           binary = staging / 'usr/bin/noir_player'
           elf = subprocess.check_output(['readelf', '-h', str(binary)], text=True)

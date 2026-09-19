@@ -1,12 +1,13 @@
 use gpui_kit::assets::IconName as MusicIcon;
 use gpui_kit::component::input::Input;
-use gpui_kit::component::scroll::ScrollableElement;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
-use crate::views::ui::{backdrop_transition, icon_text, modal_transition, red, white};
+use crate::views::ui::{
+    backdrop_transition, icon_text, modal_transition, red, smooth_scroll, white,
+};
 
 fn c(hex: u32) -> Hsla {
     rgb(hex).into()
@@ -124,12 +125,10 @@ pub fn render_settings_modal(
                     }))
                     .child(modal_header(model, is_light, cx))
                     .child(category_chips(model, is_light, cx))
-                    .child(
+                    .child(smooth_scroll(
+                        "settings-smooth-scroll",
                         div()
-                            .id("settings-scroll")
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scrollbar()
+                            .w_full()
                             .px(px(16.0))
                             .py(px(10.0))
                             .flex()
@@ -143,7 +142,7 @@ pub fn render_settings_modal(
                                 is_light,
                                 cx,
                             )),
-                    )
+                    ))
                     .child(keyboard_hints(is_light)),
             )),
     )

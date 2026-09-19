@@ -32,6 +32,7 @@ pub enum LibraryTab {
     Favourites,
     Albums,
     Artists,
+    Folders,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,12 +40,17 @@ pub enum Collection {
     Album(String),
     Artist(String),
     Playlist(String),
+    Folder(PathBuf),
 }
 
 impl Collection {
     pub fn name(&self) -> &str {
         match self {
             Self::Album(name) | Self::Artist(name) | Self::Playlist(name) => name,
+            Self::Folder(path) => path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Folder"),
         }
     }
 }
@@ -68,6 +74,7 @@ pub struct NoirPlayerModel {
     pub library_tab: LibraryTab,
     pub library_search: Entity<InputState>,
     pub library_detail: Option<Collection>,
+    pub selected_folder_filter: Option<PathBuf>,
     pub playlist_detail: Option<String>,
     pub tracks: Vec<Track>,
     pub albums: Vec<(String, Vec<usize>)>,
@@ -156,6 +163,7 @@ impl NoirPlayerModel {
             library_tab: LibraryTab::Music,
             library_search,
             library_detail: None,
+            selected_folder_filter: None,
             playlist_detail: None,
             tracks: Vec::new(),
             albums: Vec::new(),
@@ -494,6 +502,13 @@ impl NoirPlayerModel {
                 .find(|playlist| &playlist.name == name)
                 .map(|playlist| store::resolve_paths(&playlist.paths, &self.tracks))
                 .unwrap_or_default(),
+            Collection::Folder(path) => self
+                .tracks
+                .iter()
+                .enumerate()
+                .filter(|(_, track)| track.path.starts_with(path))
+                .map(|(index, _)| index)
+                .collect(),
         }
     }
 
@@ -601,6 +616,13 @@ impl NoirPlayerModel {
                     let _ = this.update(cx, |this, cx| {
                         if !this.store.music_folders.contains(&path) {
                             let mut next = this.store.clone();
+                            if next.music_folders.is_empty() {
+                                if let Some(default_folder) = media::default_music_folder() {
+                                    if default_folder != path {
+                                        next.music_folders.push(default_folder);
+                                    }
+                                }
+                            }
                             next.music_folders.push(path);
                             this.save_store(next, cx);
                             this.rescan(cx);

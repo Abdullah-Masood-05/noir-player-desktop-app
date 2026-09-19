@@ -394,11 +394,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-  draft:
+  release:
     needs: [validate, checks, package]
     if: github.repository == 'Abdullah-Masood-05/noir-player-desktop-app' && (github.event_name == 'push' || inputs.create_draft)
     runs-on: ubuntu-24.04
-    environment: release-draft
     permissions:
       contents: write
     env:
@@ -441,11 +440,11 @@ jobs:
           assert match and match.group(1).strip()
           pathlib.Path('release-notes.txt').write_text(match.group(1).strip() + '\n')
           PY
-      - name: Create draft only
+      - name: Create release
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo '::error::A release already exists. Review it manually; this workflow never replaces release assets.'
             exit 1
           fi
           gh release create "$RELEASE_TAG" dist/*.msi dist/*-setup.exe dist/*.dmg dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.sha256 dist/SHA256SUMS \
-            --verify-tag --draft --title "Noir Player $VERSION" --notes-file release-notes.txt
+            --verify-tag --title "Noir Player $VERSION" --notes-file release-notes.txt

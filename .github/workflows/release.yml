@@ -236,7 +236,9 @@ jobs:
           staging = pathlib.Path(os.environ['RUNNER_TEMP']) / 'noir-deb'
           subprocess.run(['dpkg-deb', '--raw-extract', str(packages[0]), str(staging)], check=True)
           desktop = staging / 'usr/share/applications/noir_player.desktop'
-          text = desktop.read_text().replace('Icon=noir_player', f'Icon={app_id}')
+          text = desktop.read_text()
+          text = re.sub(r'^Name=.*', 'Name=Noir Player', text, flags=re.M)
+          text = text.replace('Icon=noir_player', f'Icon={app_id}')
           desktop.unlink()
           desktop = desktop.with_name(f'{app_id}.desktop')
           desktop.write_text(text + f'StartupWMClass={app_id}\n')
@@ -440,11 +442,13 @@ jobs:
           assert match and match.group(1).strip()
           pathlib.Path('release-notes.txt').write_text(match.group(1).strip() + '\n')
           PY
-      - name: Create release
+      - name: Create or update release
         run: |
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo '::error::A release already exists. Review it manually; this workflow never replaces release assets.'
-            exit 1
+            echo "Release $RELEASE_TAG already exists, updating assets..."
+            gh release upload "$RELEASE_TAG" dist/*.msi dist/*-setup.exe dist/*.dmg dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.sha256 dist/SHA256SUMS --clobber
+            gh release edit "$RELEASE_TAG" --draft=false --title "Noir Player $VERSION" --notes-file release-notes.txt
+          else
+            gh release create "$RELEASE_TAG" dist/*.msi dist/*-setup.exe dist/*.dmg dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.sha256 dist/SHA256SUMS \
+              --verify-tag --title "Noir Player $VERSION" --notes-file release-notes.txt
           fi
-          gh release create "$RELEASE_TAG" dist/*.msi dist/*-setup.exe dist/*.dmg dist/*.deb dist/*.rpm dist/*.pkg.tar.zst dist/*.sha256 dist/SHA256SUMS \
-            --verify-tag --title "Noir Player $VERSION" --notes-file release-notes.txt

@@ -9,6 +9,10 @@ fn main() {
         std::fs::write(&ico_path, ico).expect("Failed to write ICO");
         winresource::WindowsResource::new()
             .set_icon_with_id(ico_path.to_str().unwrap(), "1")
+            .set("ProductName", "Noir Player")
+            .set("FileDescription", "Noir Player")
+            .set("InternalName", "Noir Player")
+            .set("OriginalFilename", "Noir Player.exe")
             .compile()
             .expect("Failed to compile Noir Player Windows icon resource");
     }

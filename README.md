@@ -36,10 +36,16 @@ Switch themes anytime via the theme toggle in the window header or inside **Sett
 
 | Shortcut | Action |
 | --- | --- |
+| `P` / `Space` | Play / Pause current track |
+| `Left Arrow` | Seek backward by configured interval (default 10s) |
+| `Right Arrow` | Seek forward by configured interval (default 10s) |
+| `Shift + Left Arrow` | Previous track |
+| `Shift + Right Arrow` | Next track |
+| `Up Arrow` | Increase volume (+5%) with in-app sound indicator |
+| `Down Arrow` | Decrease volume (-5%) with in-app sound indicator |
 | `Ctrl+,` / `Cmd+,` | Open / close Settings & Preferences |
 | `Ctrl+E` / `Cmd+E` | Open / close 5-Band Graphic Equalizer |
 | `Escape` | Dismiss open dialogs, settings, or equalizer |
-| `Space` | Play / Pause current track |
 
 ## Discover and API configuration
 

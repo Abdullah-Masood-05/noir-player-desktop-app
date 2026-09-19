@@ -17,9 +17,13 @@ Version 1.2.0 brings major enhancements across audio, library organization, them
 - **5-Band Graphic Equalizer**: Built-in 5-band audio equalizer with custom gain controls and presets (Flat, Bass Boost, Treble Boost, Vocal Boost, Rock, Electronic). Accessible via `Ctrl+E` or header quick action.
 - **Adaptive Red & White Light Theme**: Introduced a light theme matching the mobile NoirPlayer app with elegant white cards, clean `#FAFAFA` background, `#1A1A1A` charcoal typography, and crimson accents.
 - **Vibrant Dark Theme Top Glow**: Restored the rich red aura wash at the top of Library, Discover, Playlists, and Player screens.
-- **Global Keyboard Shortcuts**:
-  - `Ctrl+,` — Open / close Settings modal
-  - `Ctrl+E` — Open Equalizer
+- **Global Keyboard Shortcuts & In-App Sound Control**:
+  - `P` or `Space` — Play / Pause current track
+  - `Left Arrow` / `Right Arrow` — Seek backward / forward by configured interval (default 10s)
+  - `Shift + Left Arrow` / `Shift + Right Arrow` — Previous / Next track
+  - `Up Arrow` / `Down Arrow` — Increase / decrease volume (±5%) with real-time in-app sound HUD indicator
+  - `Ctrl+,` (`Cmd+,`) — Open / close Settings modal
+  - `Ctrl+E` (`Cmd+E`) — Open / close 5-Band Graphic Equalizer
   - `Escape` — Dismiss open dialogs and overlays
 - **Fluid Modal Transitions & Scroll Isolation**: Smooth backdrop and dialog animations with scroll wheel containment preventing background songs from scrolling behind open modals.
 - **Rich Settings & About View**: Integrated quick category navigation, customizable seek intervals, theme switching, download and folder pickers, and app version details.

@@ -36,6 +36,14 @@ impl SettingsCategory {
     }
 }
 
+/// Which control the software update row offers.
+#[derive(Clone, Copy)]
+enum UpdateAction {
+    Check,
+    View(&'static str),
+    Busy(&'static str),
+}
+
 pub fn render_settings_modal(
     model: &mut NoirPlayerModel,
     cx: &mut Context<NoirPlayerModel>,
@@ -861,35 +869,54 @@ fn build_rows(
 
         // Software Update Check Row
         let update_status = model.update_status.clone();
-        let (status_text, is_available, is_checking) = match update_status {
+        let current = env!("CARGO_PKG_VERSION");
+        // `action` decides which control the row offers: check, open the
+        // update dialog, or nothing while the updater is busy.
+        let (status_text, action) = match update_status {
             crate::update::UpdateStatus::Idle => (
-                format!(
-                    "Noir Player v{} is installed \u{2022} Tap Check Now to verify",
-                    env!("CARGO_PKG_VERSION")
-                ),
-                false,
-                false,
+                format!("Noir Player v{current} is installed \u{2022} Tap Check Now to verify"),
+                UpdateAction::Check,
             ),
             crate::update::UpdateStatus::Checking => (
                 "Checking GitHub Releases for updates...".to_string(),
-                false,
-                true,
+                UpdateAction::Busy("Checking..."),
             ),
             crate::update::UpdateStatus::UpToDate => (
-                format!("Noir Player v{} is up to date", env!("CARGO_PKG_VERSION")),
-                false,
-                false,
+                format!("Noir Player v{current} is up to date"),
+                UpdateAction::Check,
             ),
             crate::update::UpdateStatus::Available(ref r) => (
                 format!(
-                    "Update available: v{} \u{2014} Tap to view release notes",
+                    "Update available: v{} \u{2022} Tap to view release notes",
                     r.version
                 ),
-                true,
-                false,
+                UpdateAction::View("View Update"),
+            ),
+            crate::update::UpdateStatus::Downloading { received, total } => {
+                let percent = received
+                    .checked_mul(100)
+                    .and_then(|scaled| scaled.checked_div(total))
+                    .unwrap_or(0)
+                    .min(100);
+                (
+                    format!("Downloading the update: {percent}%"),
+                    UpdateAction::View("View Progress"),
+                )
+            }
+            crate::update::UpdateStatus::Verifying => (
+                "Verifying the downloaded update...".to_string(),
+                UpdateAction::View("View Progress"),
+            ),
+            crate::update::UpdateStatus::Ready(_) => (
+                "Update downloaded and verified".to_string(),
+                UpdateAction::View("Install"),
+            ),
+            crate::update::UpdateStatus::Installing => (
+                "Starting the installer...".to_string(),
+                UpdateAction::Busy("Installing..."),
             ),
             crate::update::UpdateStatus::Error(ref e) => {
-                (format!("Update check failed: {e}"), false, false)
+                (format!("Update failed: {e}"), UpdateAction::Check)
             }
         };
 
@@ -898,8 +925,8 @@ fn build_rows(
             row_base(idx, active, is_light, cx)
                 .justify_between()
                 .child(label_cell("Software Update", &status_text, is_light))
-                .child(if is_available {
-                    div()
+                .child(match action {
+                    UpdateAction::View(label) => div()
                         .id("view-update-btn")
                         .px(px(12.0))
                         .py(px(6.0))
@@ -919,9 +946,8 @@ fn build_rows(
                             cx.notify();
                         }))
                         .child(icon_text(MusicIcon::Sparkles, 13.0))
-                        .child("View Update")
-                } else if is_checking {
-                    div()
+                        .child(label),
+                    UpdateAction::Busy(label) => div()
                         .id("checking-update-btn")
                         .px(px(12.0))
                         .py(px(6.0))
@@ -930,9 +956,8 @@ fn build_rows(
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(if is_light { c(0x71717A) } else { white(0.5) })
-                        .child("Checking...")
-                } else {
-                    div()
+                        .child(label),
+                    UpdateAction::Check => div()
                         .id("check-update-btn")
                         .px(px(12.0))
                         .py(px(6.0))
@@ -953,7 +978,7 @@ fn build_rows(
                             this.check_for_updates(true, cx);
                         }))
                         .child(icon_text(MusicIcon::RotateCw, 13.0))
-                        .child("Check Now")
+                        .child("Check Now"),
                 })
                 .into_any_element(),
         );

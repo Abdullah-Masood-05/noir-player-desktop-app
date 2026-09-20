@@ -4,6 +4,49 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.0.0]
+
+### Desktop Shell, Letter-Grouped Songs, Up Next Queue & Now Playing Page
+
+Version 2.0.0 is a major milestone release that completely transforms Noir Player into a modern, 3-column desktop music experience with alphabetical letter headings, an Up Next queue rail, a persistent full-width transport bar, a dedicated full-window Now Playing screen with dual waveforms, and embedded lyrics support.
+
+### Highlights & New Features
+
+- **3-Column Desktop Layout**:
+  - **Left Navigation Rail**: Quick access to Library, Favorites, Albums, Artists, Folders, Playlists, Discover, Recently Played, and Settings pinned at the bottom.
+  - **Center Main View**: Expansive content view with dynamic greeting hero banner, statistics (songs, albums, artists), recently played shelf, and rich song tables.
+  - **Right "Up Next" Queue Rail**: Dockable queue rail displaying upcoming songs with remove and clear actions, smoothly collapsible to a slim reopen strip.
+  - **Bottom Transport Bar**: Full-width persistent player bar with large artwork, track metadata, interactive click-to-seek scrubber with elapsed/remaining times, volume slider, and toggles for lyrics, equalizer, and queue.
+- **Alphabetical Song Grouping & Letter Headings**:
+  - Songs are sorted A to Z by default, grouped under small letter section headings (`#`, `A`–`Z`) with track counts for each section.
+  - Titles starting with digits or symbols are neatly filed under a leading `#` section.
+  - Comprehensive sort picker supporting: A to Z, Z to A, Artist, Album, Duration, and Recently Added (based on file modified time).
+  - Media folder picker in the header to filter songs by individual scan folders.
+- **Full-Window "Now Playing" Page**:
+  - Centered high-resolution album artwork between two dynamic crimson audio waveforms.
+  - Quick 5-second skip backward (`-5s`) and forward (`+5s`) controls.
+  - Embedded lyrics panel read directly from file tags on demand.
+  - Floating "Up Next" preview card and bottom action bar with liked, queue, lyrics, equalizer, and song menu buttons.
+- **Recently Played Shelf**:
+  - Horizontal shelf of recently played tracks with artwork cards and a "See all" shortcut that opens the full history page.
+  - Play history persists across application restarts in `playlists.json`.
+- **Enhanced Media Metadata**:
+  - Scanner now extracts release year tags and file modification times.
+  - Song table displays "Artist • Album (Year)" and duration.
+- **Upgraded Playlists & Discover**:
+  - Both pages adopt the modern desktop header shell and consistent styling.
+  - Playlists reuse the sorted song table with alphabetical letter headings.
+
+### Downloads
+
+- Windows (x64 MSI): `noir-player-2.0.0-windows-x64.msi`
+- Windows (x64 Setup): `noir-player-2.0.0-windows-x64-setup.exe`
+- macOS (Apple Silicon): `noir-player-2.0.0-macos-arm64.dmg`
+- Linux (Debian & Ubuntu): `noir-player-2.0.0-linux-x64.deb`
+- Linux (Fedora & RHEL): `noir-player-2.0.0-linux-x64.rpm`
+- Linux (Arch): `noir-player-2.0.0-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or `SHA256SUMS`
+
 ## [1.2.1]
 
 ### Automatic & Manual Update Checks, Settings Toggle & Update Modal

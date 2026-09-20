@@ -8,7 +8,7 @@
 
 This is the desktop version of [NoirPlayer for Android](https://github.com/Abdullah-Masood-05/NoirPlayer), rebuilt in Rust with GPUI Kit. The window is laid out for a desktop: a navigation rail on the left, the song list in the middle, a queue you can dock on the right, and a transport bar along the bottom. It keeps the red-on-black look of the mobile app, has a light theme for daylight, and adds multi-folder library scanning, a 5-band graphic equalizer and Discover.
 
-Version 1.2.1. See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
+Version 2.0.0. See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
 
 ## Playback and library
 

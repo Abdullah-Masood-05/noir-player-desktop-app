@@ -487,7 +487,23 @@ pub fn launch_installer(installer: &Path) -> Result<()> {
     if !installer.is_file() {
         bail!("The downloaded installer is missing.");
     }
+    // An installer pointed at a build directory registers that directory as
+    // the install location, which later installs then inherit. A development
+    // build has nothing to update in place, so it does not install at all.
+    if running_from_build_output() {
+        bail!(
+            "This build runs from the cargo target directory, so there is nothing to update in              place. Install a released build to use the updater."
+        );
+    }
     spawn_installer(&installer)
+}
+
+/// Whether the running executable sits in a cargo build directory.
+fn running_from_build_output() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(is_cargo_build_output))
+        .unwrap_or(false)
 }
 
 /// An absolute path without the `\\?\` prefix that `canonicalize` adds on
@@ -535,27 +551,42 @@ fn spawn_installer(installer: &Path) -> Result<()> {
 /// and asks for elevation on its own. The exit code is logged either way, so
 /// a failed install leaves a trace instead of silently reopening the old
 /// build.
+/// Whether a directory is a cargo build output such as `target/debug` or
+/// `target/x86_64-pc-windows-msvc/release`.
+fn is_cargo_build_output(dir: &Path) -> bool {
+    let profile = dir.file_name().and_then(|name| name.to_str());
+    matches!(profile, Some("debug") | Some("release"))
+        && dir
+            .ancestors()
+            .any(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("target"))
+}
+
 #[cfg(target_os = "windows")]
 fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) -> String {
     let is_msi = installer
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("msi"));
     let run = if is_msi {
-        format!(
-            r#"start "" /wait %SystemRoot%\System32\msiexec.exe /i "{}" /passive /norestart"#,
-            installer.display()
-        )
-    } else {
-        // `/D` sets the target directory, pinning the update to the directory
-        // the app runs from. NSIS requires it last and unquoted.
-        match exe.parent() {
+        // INSTALLDIR pins the upgrade to the directory the app runs from.
+        // Without it the package reads Software\<Manufacturer>\<ProductName>
+        // from the registry, which the NSIS installer also writes, so an MSI
+        // can land wherever an earlier per user install happened to go.
+        match exe.parent().filter(|dir| !is_cargo_build_output(dir)) {
             Some(dir) => format!(
-                r#"start "" /wait "{}" /S /D={}"#,
+                r#"start "" /wait %SystemRoot%\System32\msiexec.exe /i "{}" INSTALLDIR="{}" /passive /norestart"#,
                 installer.display(),
                 dir.display()
             ),
-            None => format!(r#"start "" /wait "{}" /S"#, installer.display()),
+            None => format!(
+                r#"start "" /wait %SystemRoot%\System32\msiexec.exe /i "{}" /passive /norestart"#,
+                installer.display()
+            ),
         }
+    } else {
+        // No `/D`: the setup knows where it installed itself, and forcing a
+        // directory is what put an install inside a build folder and left
+        // that path in the registry for the MSI to inherit.
+        format!(r#"start "" /wait "{}" /S"#, installer.display())
     };
 
     // Absolute paths: a developer's PATH often puts a Unix `find` (Git for
@@ -854,17 +885,48 @@ mod tests {
         assert!(setup.contains("goto waitloop"));
         // `start` cannot parse extended-length paths, so none may reach it.
         assert!(!setup.contains(r"\\?\"));
-        assert!(setup.contains(
-            r#"start "" /wait "C:\cache\noir-player-2.0.0-windows-x64-setup.exe" /S /D=C:\Program Files\Noir Player"#
-        ));
+        // No /D: the setup keeps its own install location, the way Zed leaves
+        // the directory to the installer that owns it.
+        assert!(setup
+            .contains(r#"start "" /wait "C:\cache\noir-player-2.0.0-windows-x64-setup.exe" /S"#));
+        assert!(!setup.contains("/D="));
         assert!(setup.contains(r#"start "" "C:\Program Files\Noir Player\noir_player.exe""#));
         assert!(setup.contains(r#"exit=%errorlevel% >> "C:\cache\update.install.log""#));
         assert!(setup.contains(r#"del "%~f0""#));
 
+        // INSTALLDIR keeps an upgrade in the directory the app runs from,
+        // rather than a path read out of the registry.
         let msi = windows_install_script(1, Path::new(r"C:\cache\update.msi"), exe, log);
         assert!(msi.contains(
-            r#"start "" /wait %SystemRoot%\System32\msiexec.exe /i "C:\cache\update.msi" /passive /norestart"#
+            r#"msiexec.exe /i "C:\cache\update.msi" INSTALLDIR="C:\Program Files\Noir Player" /passive /norestart"#
         ));
+    }
+
+    /// Running from `cargo build` output is not an install: pointing an
+    /// installer there registers the build directory as the app's location,
+    /// which a later MSI then inherits through the registry.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_build_directory_is_never_used_as_the_install_target() {
+        let log = Path::new(r"C:\cache\update.install.log");
+
+        for build in [
+            r"C:\src\noir\target\debug\noir_player.exe",
+            r"C:\src\noir\target\release\noir_player.exe",
+            r"C:\src\noir\target\x86_64-pc-windows-msvc\release\noir_player.exe",
+        ] {
+            let script =
+                windows_install_script(7, Path::new(r"C:\cache\update.msi"), Path::new(build), log);
+            assert!(
+                !script.contains("INSTALLDIR="),
+                "pinned Windows Installer into the build directory: {build}"
+            );
+            assert!(is_cargo_build_output(Path::new(build).parent().unwrap()));
+        }
+
+        assert!(!is_cargo_build_output(Path::new(
+            r"C:\Users\me\AppData\Local\Programs\Noir Player"
+        )));
     }
 
     /// A per machine install has to be upgraded by Windows Installer. The

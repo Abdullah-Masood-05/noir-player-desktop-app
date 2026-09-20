@@ -1,2 +1,3 @@
-pub mod mini_player;
-pub mod nav;
+pub mod player_bar;
+pub mod queue_panel;
+pub mod sidebar;

@@ -11,7 +11,7 @@ use gpui_kit::*;
 
 use crate::media::{self, MediaPlayer, Track};
 use crate::views::{discover, library, player, playlists};
-use crate::widgets::{mini_player, nav};
+use crate::widgets::{player_bar, queue_panel, sidebar};
 
 #[path = "store.rs"]
 pub mod store;
@@ -29,10 +29,101 @@ pub enum ActiveTab {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LibraryTab {
     Music,
+    /// The song list on its own, without the greeting and recent shelves.
+    AllSongs,
     Favourites,
     Albums,
     Artists,
     Folders,
+    RecentlyPlayed,
+}
+
+/// Ordering applied to every song list in the library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SortMode {
+    TitleAsc,
+    TitleDesc,
+    Artist,
+    Album,
+    Duration,
+    RecentlyAdded,
+}
+
+impl SortMode {
+    pub const ALL: [SortMode; 6] = [
+        SortMode::TitleAsc,
+        SortMode::TitleDesc,
+        SortMode::Artist,
+        SortMode::Album,
+        SortMode::Duration,
+        SortMode::RecentlyAdded,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortMode::TitleAsc => "A to Z",
+            SortMode::TitleDesc => "Z to A",
+            SortMode::Artist => "Artist",
+            SortMode::Album => "Album",
+            SortMode::Duration => "Duration",
+            SortMode::RecentlyAdded => "Recently Added",
+        }
+    }
+
+    /// Only the alphabetical orderings are broken into letter sections.
+    pub fn has_letter_sections(self) -> bool {
+        matches!(self, SortMode::TitleAsc | SortMode::TitleDesc)
+    }
+}
+
+/// The letter a song is filed under. Titles that do not start with a Latin
+/// letter (numbers, symbols, other scripts) share the leading `#` section.
+pub fn section_letter(title: &str) -> char {
+    match title.trim_start().chars().next() {
+        Some(letter) if letter.is_ascii_alphabetic() => letter.to_ascii_uppercase(),
+        _ => '#',
+    }
+}
+
+/// A destination in the left navigation rail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NavDestination {
+    Library,
+    Favourites,
+    Albums,
+    Artists,
+    Folders,
+    Playlists,
+    Discover,
+    RecentlyPlayed,
+}
+
+impl NavDestination {
+    pub fn label(self) -> &'static str {
+        match self {
+            NavDestination::Library => "Library",
+            NavDestination::Favourites => "Favorites",
+            NavDestination::Albums => "Albums",
+            NavDestination::Artists => "Artists",
+            NavDestination::Folders => "Folders",
+            NavDestination::Playlists => "Playlists",
+            NavDestination::Discover => "Discover",
+            NavDestination::RecentlyPlayed => "Recently Played",
+        }
+    }
+
+    /// The library tab a destination selects, if it is a library view.
+    fn library_tab(self) -> Option<LibraryTab> {
+        match self {
+            NavDestination::Library => Some(LibraryTab::Music),
+            NavDestination::Favourites => Some(LibraryTab::Favourites),
+            NavDestination::Albums => Some(LibraryTab::Albums),
+            NavDestination::Artists => Some(LibraryTab::Artists),
+            NavDestination::Folders => Some(LibraryTab::Folders),
+            NavDestination::RecentlyPlayed => Some(LibraryTab::RecentlyPlayed),
+            NavDestination::Playlists | NavDestination::Discover => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,6 +145,10 @@ impl Collection {
         }
     }
 }
+
+/// A single entry in the per-song action sheet.
+type SongAction =
+    std::rc::Rc<dyn Fn(&mut NoirPlayerModel, &mut Window, &mut Context<NoirPlayerModel>)>;
 
 struct DiscoverAudioJob {
     request: u64,
@@ -103,6 +198,17 @@ pub struct NoirPlayerModel {
     discover_audio_job: Option<DiscoverAudioJob>,
     discover_cached: Vec<media::PreparedAudio>,
     discover_downloads: Vec<Track>,
+    pub sort_mode: SortMode,
+    pub sort_menu_open: bool,
+    pub media_menu_open: bool,
+    pub queue_open: bool,
+    pub lyrics_open: bool,
+    pub lyrics: Option<String>,
+    lyrics_path: Option<PathBuf>,
+    /// Laid-out bounds of the player bar scrubber, used to map clicks to a time.
+    pub seek_bounds: Option<Bounds<Pixels>>,
+    /// Laid-out bounds of the volume slider track.
+    pub volume_bounds: Option<Bounds<Pixels>>,
     pub settings_open: bool,
     pub equalizer_open: bool,
     pub root_focus_handle: FocusHandle,
@@ -199,6 +305,15 @@ impl NoirPlayerModel {
             discover_audio_job: None,
             discover_cached: Vec::new(),
             discover_downloads: Vec::new(),
+            sort_mode: SortMode::TitleAsc,
+            sort_menu_open: false,
+            media_menu_open: false,
+            queue_open: true,
+            lyrics_open: false,
+            lyrics: None,
+            lyrics_path: None,
+            seek_bounds: None,
+            volume_bounds: None,
             settings_open: false,
             equalizer_open: false,
             root_focus_handle: cx.focus_handle(),
@@ -574,6 +689,345 @@ impl NoirPlayerModel {
                 })
             })
             .collect()
+    }
+
+    /// Applies the active sort order to `indices`.
+    pub fn sorted_indices(&self, mut indices: Vec<usize>) -> Vec<usize> {
+        let title_key = |index: &usize| -> (u8, char, String, String) {
+            let track = &self.tracks[*index];
+            let letter = section_letter(&track.title);
+            (
+                u8::from(letter != '#'),
+                letter,
+                track.title.to_lowercase(),
+                track.artist.to_lowercase(),
+            )
+        };
+        indices.retain(|&index| index < self.tracks.len());
+        match self.sort_mode {
+            SortMode::TitleAsc => indices.sort_by_cached_key(title_key),
+            SortMode::TitleDesc => {
+                indices.sort_by_cached_key(title_key);
+                indices.reverse();
+            }
+            SortMode::Artist => indices.sort_by_cached_key(|&index| {
+                let track = &self.tracks[index];
+                (
+                    track.artist.to_lowercase(),
+                    track.album.to_lowercase(),
+                    track.title.to_lowercase(),
+                )
+            }),
+            SortMode::Album => indices.sort_by_cached_key(|&index| {
+                let track = &self.tracks[index];
+                (
+                    track.album.to_lowercase(),
+                    track.title.to_lowercase(),
+                    track.artist.to_lowercase(),
+                )
+            }),
+            SortMode::Duration => indices.sort_by_cached_key(|&index| {
+                let track = &self.tracks[index];
+                (track.duration, track.title.to_lowercase())
+            }),
+            SortMode::RecentlyAdded => indices.sort_by_cached_key(|&index| {
+                let track = &self.tracks[index];
+                // Newest first; files without a timestamp sort last.
+                (std::cmp::Reverse(track.added), track.title.to_lowercase())
+            }),
+        }
+        indices
+    }
+
+    /// Splits sorted `indices` into the sections drawn in the song list. In an
+    /// alphabetical order every section carries its letter heading; other
+    /// orders return a single unlabelled section.
+    pub fn letter_sections(&self, indices: Vec<usize>) -> Vec<(Option<char>, Vec<usize>)> {
+        if !self.sort_mode.has_letter_sections() {
+            return if indices.is_empty() {
+                Vec::new()
+            } else {
+                vec![(None, indices)]
+            };
+        }
+        let mut sections: Vec<(Option<char>, Vec<usize>)> = Vec::new();
+        for index in indices {
+            let letter = section_letter(&self.tracks[index].title);
+            match sections.last_mut() {
+                Some((Some(current), songs)) if *current == letter => songs.push(index),
+                _ => sections.push((Some(letter), vec![index])),
+            }
+        }
+        sections
+    }
+
+    /// Library indices of the songs played most recently, newest first.
+    pub fn recently_played_indices(&self) -> Vec<usize> {
+        store::resolve_paths(&self.store.recently_played, &self.tracks)
+    }
+
+    /// The indices backing the selected sidebar destination, before the search
+    /// and the sort order are applied.
+    pub fn tab_indices(&self) -> Vec<usize> {
+        match self.library_tab {
+            LibraryTab::Favourites => store::resolve_paths(&self.store.favourites, &self.tracks),
+            LibraryTab::RecentlyPlayed => self.recently_played_indices(),
+            _ => match self.selected_folder_filter.as_ref() {
+                Some(folder) => (0..self.tracks.len())
+                    .filter(|&index| self.tracks[index].path.starts_with(folder))
+                    .collect(),
+                None => (0..self.tracks.len()).collect(),
+            },
+        }
+    }
+
+    /// Whether a navigation rail destination is the one on screen.
+    pub fn is_current_destination(&self, destination: NavDestination) -> bool {
+        if self.settings_open {
+            return false;
+        }
+        match destination {
+            NavDestination::Playlists => self.active_tab == ActiveTab::Playlists,
+            NavDestination::Discover => self.active_tab == ActiveTab::Discover,
+            NavDestination::Library => {
+                self.active_tab == ActiveTab::Library
+                    && matches!(self.library_tab, LibraryTab::Music | LibraryTab::AllSongs)
+            }
+            other => {
+                self.active_tab == ActiveTab::Library
+                    && other.library_tab() == Some(self.library_tab)
+            }
+        }
+    }
+
+    pub fn navigate(&mut self, destination: NavDestination, cx: &mut Context<Self>) {
+        self.settings_open = false;
+        self.sort_menu_open = false;
+        self.media_menu_open = false;
+        match destination {
+            NavDestination::Playlists => {
+                self.active_tab = ActiveTab::Playlists;
+                self.playlist_detail = None;
+            }
+            NavDestination::Discover => {
+                self.active_tab = ActiveTab::Discover;
+                if self.discover_request == 0 {
+                    self.load_discover(String::new(), cx);
+                }
+            }
+            other => {
+                self.active_tab = ActiveTab::Library;
+                self.library_detail = None;
+                if let Some(tab) = other.library_tab() {
+                    self.library_tab = tab;
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn set_sort_mode(&mut self, mode: SortMode, cx: &mut Context<Self>) {
+        self.sort_mode = mode;
+        self.sort_menu_open = false;
+        cx.notify();
+    }
+
+    pub fn set_folder_filter(&mut self, folder: Option<PathBuf>, cx: &mut Context<Self>) {
+        self.selected_folder_filter = folder;
+        self.media_menu_open = false;
+        cx.notify();
+    }
+
+    pub fn close_menus(&mut self, cx: &mut Context<Self>) {
+        if self.sort_menu_open || self.media_menu_open {
+            self.sort_menu_open = false;
+            self.media_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_queue_panel(&mut self, cx: &mut Context<Self>) {
+        self.queue_open = !self.queue_open;
+        cx.notify();
+    }
+
+    /// Position of the playing song inside the queue.
+    pub fn queue_position(&self) -> Option<usize> {
+        let current = self.current?;
+        self.queue.iter().position(|&index| index == current)
+    }
+
+    /// The playing song followed by everything still to come.
+    pub fn upcoming_queue(&self) -> Vec<usize> {
+        match self.queue_position() {
+            Some(position) => self.queue[position..].to_vec(),
+            None => self.queue.clone(),
+        }
+    }
+
+    pub fn clear_queue(&mut self, cx: &mut Context<Self>) {
+        self.queue = self.current.into_iter().collect();
+        cx.notify();
+    }
+
+    pub fn add_to_queue(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.tracks.len() && !self.queue.contains(&index) {
+            self.queue.push(index);
+        }
+        cx.notify();
+    }
+
+    pub fn play_next(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.tracks.len() {
+            return;
+        }
+        self.queue.retain(|&queued| queued != index);
+        match self.queue_position() {
+            Some(position) => self.queue.insert(position + 1, index),
+            None => self.queue.insert(0, index),
+        }
+        cx.notify();
+    }
+
+    pub fn remove_from_queue(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.current == Some(index) {
+            return;
+        }
+        self.queue.retain(|&queued| queued != index);
+        cx.notify();
+    }
+
+    /// Seeks the playing song to `fraction` of its duration.
+    pub fn seek_fraction(&mut self, fraction: f32, cx: &mut Context<Self>) {
+        let Some(player) = self.player.as_ref() else {
+            return;
+        };
+        let Some(total) = player.duration().filter(|total| !total.is_zero()) else {
+            return;
+        };
+        let target = total.mul_f32(fraction.clamp(0.0, 1.0));
+        if let Err(error) = player.seek(target) {
+            self.error = Some(format!("{error:#}"));
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_lyrics(&mut self, cx: &mut Context<Self>) {
+        self.lyrics_open = !self.lyrics_open;
+        if self.lyrics_open {
+            self.refresh_lyrics(cx);
+        }
+        cx.notify();
+    }
+
+    /// Loads the lyrics tag of the playing song in the background, once per file.
+    pub fn refresh_lyrics(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.now_playing().map(|track| track.path.clone()) else {
+            self.lyrics = None;
+            self.lyrics_path = None;
+            return;
+        };
+        if self.lyrics_path.as_ref() == Some(&path) {
+            return;
+        }
+        self.lyrics_path = Some(path.clone());
+        self.lyrics = None;
+        cx.spawn(async move |this, cx| {
+            let lookup = path.clone();
+            let lyrics = cx
+                .background_executor()
+                .spawn(async move { crate::media::read_lyrics(&lookup) })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.lyrics_path.as_ref() == Some(&path) {
+                    this.lyrics = lyrics;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Opens the per-song action sheet behind a row's "more" button.
+    pub fn song_actions_dialog(
+        &mut self,
+        index: usize,
+        playlist: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(track) = self.tracks.get(index) else {
+            return;
+        };
+        let title = track.title.clone();
+        let subtitle = format!("{} · {}", track.artist, track.album);
+        let path = track.path.clone();
+        let favourite = self.is_favourite(index);
+        let weak = cx.entity().downgrade();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let muted = cx.theme().muted_foreground;
+            let build = |id: &'static str, label: String, handler: SongAction| {
+                let weak = weak.clone();
+                Button::new(id).label(label).w_full().on_click({
+                    let handler = handler.clone();
+                    move |_, window, cx| {
+                        let handler = handler.clone();
+                        let _ = weak.update(cx, |this, cx| handler(this, window, cx));
+                        window.close_dialog(cx);
+                    }
+                })
+            };
+            let playlist_name = playlist.clone();
+            let remove_path = path.clone();
+            dialog
+                .title(title.clone())
+                .child(
+                    v_flex()
+                        .gap(px(8.0))
+                        .child(div().text_sm().text_color(muted).child(subtitle.clone()))
+                        .child(build(
+                            "song-action-play",
+                            "Play now".to_string(),
+                            std::rc::Rc::new(move |this, _, cx| this.play_index(index, cx)),
+                        ))
+                        .child(build(
+                            "song-action-next",
+                            "Play next".to_string(),
+                            std::rc::Rc::new(move |this, _, cx| this.play_next(index, cx)),
+                        ))
+                        .child(build(
+                            "song-action-queue",
+                            "Add to queue".to_string(),
+                            std::rc::Rc::new(move |this, _, cx| this.add_to_queue(index, cx)),
+                        ))
+                        .child(build(
+                            "song-action-favourite",
+                            if favourite {
+                                "Remove from favourites".to_string()
+                            } else {
+                                "Add to favourites".to_string()
+                            },
+                            std::rc::Rc::new(move |this, _, cx| this.toggle_favourite(index, cx)),
+                        ))
+                        .child(build(
+                            "song-action-playlist",
+                            "Add to playlist".to_string(),
+                            std::rc::Rc::new(move |this, window, cx| {
+                                this.add_to_playlist_dialog(index, window, cx)
+                            }),
+                        ))
+                        .children(playlist_name.map(|name| {
+                            build(
+                                "song-action-remove",
+                                format!("Remove from {name}"),
+                                std::rc::Rc::new(move |this, _, cx| {
+                                    this.remove_from_playlist(&name, &remove_path, cx);
+                                }),
+                            )
+                        })),
+                )
+                .button_props(DialogButtonProps::default().ok_text("Close"))
+        });
     }
 
     pub fn is_favourite(&self, index: usize) -> bool {
@@ -1046,6 +1500,14 @@ impl NoirPlayerModel {
                 self.current = Some(index);
                 self.is_playing = true;
                 self.error = None;
+                if let Some(path) = self.tracks.get(index).map(|track| track.path.clone()) {
+                    let mut next = self.store.clone();
+                    next.remember_played(&path);
+                    self.save_store(next, cx);
+                }
+                if self.lyrics_open {
+                    self.refresh_lyrics(cx);
+                }
                 cx.notify();
                 true
             }
@@ -1161,7 +1623,6 @@ impl NoirPlayerModel {
 impl Render for NoirPlayerModel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let active_tab = self.active_tab;
-        let has_track = self.now_playing().is_some();
         let dialog_layer = Root::render_dialog_layer(window, cx);
 
         if self.equalizer_open {
@@ -1288,22 +1749,45 @@ impl Render for NoirPlayerModel {
                     }
                 }
             }))
-            .child(
+            .child(if active_tab == ActiveTab::Player {
                 v_flex()
                     .flex_1()
                     .min_h_0()
                     .w_full()
                     .overflow_hidden()
-                    .child(crate::views::ui::tab_transition(
-                        format!("main-tab-{active_tab:?}"),
-                        match active_tab {
-                            ActiveTab::Library => library::render_library(self, cx),
-                            ActiveTab::Player => player::render_player(self, cx),
-                            ActiveTab::Playlists => playlists::render_playlists(self, cx),
-                            ActiveTab::Discover => discover::render_discover(self, cx),
-                        },
-                    )),
-            )
+                    .child(player::render_player(self, cx))
+                    .into_any_element()
+            } else {
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .items_stretch()
+                    .overflow_hidden()
+                    .child(sidebar::sidebar(self, cx))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .overflow_hidden()
+                            .child(crate::views::ui::tab_transition(
+                                format!("main-tab-{active_tab:?}"),
+                                match active_tab {
+                                    ActiveTab::Playlists => playlists::render_playlists(self, cx),
+                                    ActiveTab::Discover => discover::render_discover(self, cx),
+                                    _ => library::render_library(self, cx),
+                                },
+                            )),
+                    )
+                    .when(self.queue_open, |d| {
+                        d.child(queue_panel::queue_panel(self, cx))
+                    })
+                    .when(!self.queue_open, |d| {
+                        d.child(queue_panel::queue_handle(self, cx))
+                    })
+                    .into_any_element()
+            })
             .children(self.storage_error.clone().map(|error| {
                 div()
                     .flex_shrink_0()
@@ -1339,10 +1823,9 @@ impl Render for NoirPlayerModel {
                             })),
                     )
             }))
-            .when(has_track && active_tab != ActiveTab::Player, |d| {
-                d.child(mini_player::mini_player(self, cx))
+            .when(active_tab != ActiveTab::Player, |d| {
+                d.child(player_bar::player_bar(self, cx))
             })
-            .child(nav::bottom_nav(active_tab, self.settings_open, cx))
             .children(dialog_layer)
             .when(self.equalizer_open, |d| {
                 d.child(crate::views::equalizer::render_equalizer_modal(self, cx))

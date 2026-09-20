@@ -99,18 +99,6 @@ pub fn bubble_pop_item(id: impl Into<ElementId>, content: impl IntoElement) -> A
         .into_any_element()
 }
 
-pub fn selected_highlight(id: impl Into<ElementId>, selected: bool, element: Div) -> AnyElement {
-    element
-        .with_animation(
-            (id.into(), if selected { "selected" } else { "idle" }),
-            Animation::new(Duration::from_millis(160)),
-            move |element, progress| {
-                element.bg(super::red_a(if selected { progress } else { 0.0 }))
-            },
-        )
-        .into_any_element()
-}
-
 pub fn smooth_scroll(id: impl Into<ElementId>, content: impl IntoElement) -> SmoothScroll {
     SmoothScroll {
         id: id.into(),

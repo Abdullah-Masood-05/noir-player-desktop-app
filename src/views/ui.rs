@@ -1,4 +1,4 @@
-use gpui_kit::component::{Theme, ThemeMode};
+use gpui_kit::component::{h_flex, Theme, ThemeMode};
 use gpui_kit::*;
 
 #[path = "motion.rs"]
@@ -7,17 +7,26 @@ pub mod motion;
 #[allow(unused_imports)]
 pub use motion::{
     backdrop_transition, bubble_pop_item, bubbly_pop, bubbly_spring, modal_transition,
-    selected_highlight, smooth_scroll, tab_transition,
+    smooth_scroll, tab_transition,
 };
 
 pub const RED: u32 = 0xE53935;
-pub const BG: u32 = 0x121212;
-pub const SURFACE: u32 = 0x1E1E1E;
-pub const NAV_BG: u32 = 0x181818;
+pub const BG: u32 = 0x0A0A0C;
+pub const SURFACE: u32 = 0x17171C;
+
+/// Left rail behind the navigation.
+pub const SIDEBAR_BG: u32 = 0x0C0C0F;
+/// Docked panels such as the queue rail.
+pub const PANEL_BG: u32 = 0x0D0D11;
+/// Raised cards inside a view.
+pub const CARD_BG: u32 = 0x151519;
+
+pub const LIGHT_SIDEBAR_BG: u32 = 0xFFFFFF;
+pub const LIGHT_PANEL_BG: u32 = 0xFFFFFF;
+pub const LIGHT_CARD_BG: u32 = 0xFFFFFF;
 
 pub const LIGHT_BG: u32 = 0xFAFAFA;
 pub const LIGHT_SURFACE: u32 = 0xFFFFFF;
-pub const LIGHT_NAV_BG: u32 = 0xFFFFFF;
 pub const LIGHT_FOREGROUND: u32 = 0x1A1A1A;
 pub const LIGHT_MUTED: u32 = 0x757575;
 pub const LIGHT_BORDER: u32 = 0xE4E4E7;
@@ -70,14 +79,6 @@ pub fn white(a: f32) -> Hsla {
 
 pub fn bg_color() -> Hsla {
     rgb(BG).into()
-}
-
-pub fn surface() -> Hsla {
-    rgb(SURFACE).into()
-}
-
-pub fn nav_bg() -> Hsla {
-    rgb(NAV_BG).into()
 }
 
 pub fn dynamic_bg(is_light: bool) -> Hsla {
@@ -134,6 +135,105 @@ pub fn dynamic_hover(is_light: bool) -> Hsla {
     } else {
         rgb(SURFACE).into()
     }
+}
+
+/// Background of the left navigation rail.
+pub fn dynamic_sidebar(is_light: bool) -> Hsla {
+    if is_light {
+        rgb(LIGHT_SIDEBAR_BG).into()
+    } else {
+        rgb(SIDEBAR_BG).into()
+    }
+}
+
+/// Background of a docked panel, such as the queue rail.
+pub fn dynamic_panel(is_light: bool) -> Hsla {
+    if is_light {
+        rgb(LIGHT_PANEL_BG).into()
+    } else {
+        rgb(PANEL_BG).into()
+    }
+}
+
+/// Background of a raised card inside a view.
+pub fn dynamic_card(is_light: bool) -> Hsla {
+    if is_light {
+        rgb(LIGHT_CARD_BG).into()
+    } else {
+        rgb(CARD_BG).into()
+    }
+}
+
+/// A restrained hover tint for dense list rows.
+pub fn dynamic_row_hover(is_light: bool) -> Hsla {
+    if is_light {
+        hsla(0.0, 0.0, 0.0, 0.04)
+    } else {
+        white(0.05)
+    }
+}
+
+/// A hairline that separates rows and sections.
+pub fn dynamic_divider(is_light: bool) -> Hsla {
+    if is_light {
+        rgb(0xEDEDF0).into()
+    } else {
+        white(0.06)
+    }
+}
+
+/// The crimson glow that washes the bottom of the navigation rail.
+pub fn bottom_aura(is_light: bool) -> Div {
+    div()
+        .absolute()
+        .bottom_0()
+        .left_0()
+        .right_0()
+        .h(px(340.0))
+        .bg(linear_gradient(
+            0.0,
+            linear_color_stop(red_a(if is_light { 0.10 } else { 0.16 }), 0.0),
+            linear_color_stop(red_a(0.0), 1.0),
+        ))
+}
+
+/// Deterministic 0..1 noise so decorative waveforms stay stable between frames.
+fn noise(seed: u32) -> f32 {
+    let mut value = seed.wrapping_mul(2_654_435_761);
+    value ^= value >> 15;
+    value = value.wrapping_mul(2_246_822_519);
+    value ^= value >> 13;
+    (value % 1000) as f32 / 1000.0
+}
+
+/// A decorative audio waveform. `phase` animates the envelope while a song
+/// plays, `intensity` scales the bar heights and colour.
+pub fn waveform(
+    bars: usize,
+    bar_width: f32,
+    gap: f32,
+    height: f32,
+    phase: f32,
+    intensity: f32,
+) -> Div {
+    h_flex()
+        .items_center()
+        .gap(px(gap))
+        .h(px(height))
+        .flex_shrink_0()
+        .children((0..bars).map(|index| {
+            let position = index as f32 / bars.max(1) as f32;
+            // A raised-cosine envelope keeps the strip tallest in the middle.
+            let envelope = (position * std::f32::consts::PI).sin().powf(0.65);
+            let wobble = ((index as f32 * 0.8 + phase * 6.0).sin() * 0.5 + 0.5) * 0.55
+                + noise(index as u32 * 7 + 13) * 0.45;
+            let value = (envelope * wobble * intensity).clamp(0.05, 1.0);
+            div()
+                .w(px(bar_width))
+                .h(px((height * value).max(2.0)))
+                .rounded_full()
+                .bg(red_a(0.25 + value * 0.55))
+        }))
 }
 
 /// Red top wash: rich vibrant crimson in dark mode (matching the classic Noir design),

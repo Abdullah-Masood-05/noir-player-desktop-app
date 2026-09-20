@@ -1128,17 +1128,49 @@ impl NoirPlayerModel {
         let favourite = self.is_favourite(index);
         let weak = cx.entity().downgrade();
         window.open_dialog(cx, move |dialog, _, cx| {
-            let muted = cx.theme().muted_foreground;
-            let build = |id: &'static str, label: String, handler: SongAction| {
+            use crate::views::ui::{dynamic_row_hover, dynamic_subtitle, dynamic_text, icon_text};
+            use gpui_kit::assets::IconName as MusicIcon;
+
+            let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
+            // Rows rather than stacked buttons, so the sheet reads like the
+            // library's own menus instead of a stack of grey boxes.
+            let build = |id: &'static str,
+                         icon: MusicIcon,
+                         label: String,
+                         danger: bool,
+                         handler: SongAction| {
                 let weak = weak.clone();
-                Button::new(id).label(label).w_full().on_click({
-                    let handler = handler.clone();
-                    move |_, window, cx| {
+                h_flex()
+                    .id(id)
+                    .w_full()
+                    .h(px(40.0))
+                    .px(px(12.0))
+                    .gap(px(10.0))
+                    .items_center()
+                    .rounded_lg()
+                    .cursor_pointer()
+                    .text_color(if danger {
+                        crate::views::ui::red()
+                    } else {
+                        dynamic_text(is_light)
+                    })
+                    .hover(move |s| {
+                        s.bg(if danger {
+                            crate::views::ui::red_a(0.12)
+                        } else {
+                            dynamic_row_hover(is_light)
+                        })
+                    })
+                    .on_click({
                         let handler = handler.clone();
-                        let _ = weak.update(cx, |this, cx| handler(this, window, cx));
-                        window.close_dialog(cx);
-                    }
-                })
+                        move |_, window, cx| {
+                            let handler = handler.clone();
+                            let _ = weak.update(cx, |this, cx| handler(this, window, cx));
+                            window.close_dialog(cx);
+                        }
+                    })
+                    .child(icon_text(icon, 16.0))
+                    .child(div().text_sm().child(label))
             };
             let playlist_name = playlist.clone();
             let remove_path = path.clone();
@@ -1146,35 +1178,54 @@ impl NoirPlayerModel {
                 .title(title.clone())
                 .child(
                     v_flex()
-                        .gap(px(8.0))
-                        .child(div().text_sm().text_color(muted).child(subtitle.clone()))
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .px(px(12.0))
+                                .pb(px(6.0))
+                                .text_sm()
+                                .text_color(dynamic_subtitle(is_light))
+                                .overflow_hidden()
+                                .text_ellipsis()
+                                .child(subtitle.clone()),
+                        )
                         .child(build(
                             "song-action-play",
+                            MusicIcon::Play,
                             "Play now".to_string(),
+                            false,
                             std::rc::Rc::new(move |this, _, cx| this.play_index(index, cx)),
                         ))
                         .child(build(
                             "song-action-next",
+                            MusicIcon::ListStart,
                             "Play next".to_string(),
+                            false,
                             std::rc::Rc::new(move |this, _, cx| this.play_next(index, cx)),
                         ))
                         .child(build(
                             "song-action-queue",
+                            MusicIcon::ListPlus,
                             "Add to queue".to_string(),
+                            false,
                             std::rc::Rc::new(move |this, _, cx| this.add_to_queue(index, cx)),
                         ))
                         .child(build(
                             "song-action-favourite",
+                            MusicIcon::Heart,
                             if favourite {
                                 "Remove from favourites".to_string()
                             } else {
                                 "Add to favourites".to_string()
                             },
+                            false,
                             std::rc::Rc::new(move |this, _, cx| this.toggle_favourite(index, cx)),
                         ))
                         .child(build(
                             "song-action-playlist",
+                            MusicIcon::ListMusic,
                             "Add to playlist".to_string(),
+                            false,
                             std::rc::Rc::new(move |this, window, cx| {
                                 this.add_to_playlist_dialog(index, window, cx)
                             }),
@@ -1182,7 +1233,9 @@ impl NoirPlayerModel {
                         .children(playlist_name.map(|name| {
                             build(
                                 "song-action-remove",
+                                MusicIcon::Trash,
                                 format!("Remove from {name}"),
+                                true,
                                 std::rc::Rc::new(move |this, _, cx| {
                                     this.remove_from_playlist(&name, &remove_path, cx);
                                 }),

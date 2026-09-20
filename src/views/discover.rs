@@ -6,7 +6,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
-use crate::views::library::app_bar;
 use crate::views::ui::{
     dynamic_border, dynamic_subtitle, dynamic_surface, dynamic_text, icon_text, red, red_a,
     top_fade,
@@ -118,7 +117,21 @@ pub fn render_discover(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerM
             v_flex()
                 .size_full()
                 .relative()
-                .child(app_bar("Discover", is_light))
+                .child(
+                    h_flex()
+                        .w_full()
+                        .h(px(78.0))
+                        .px(px(24.0))
+                        .flex_shrink_0()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_2xl()
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(dynamic_text(is_light))
+                                .child("Discover"),
+                        ),
+                )
                 .child(
                     h_flex()
                         .p_3()

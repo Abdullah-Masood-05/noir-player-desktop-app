@@ -4,5 +4,6 @@ pub mod library;
 pub mod player;
 pub mod playlists;
 pub mod settings;
+pub mod song_menu;
 pub mod ui;
 pub mod update;

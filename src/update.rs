@@ -583,19 +583,10 @@ fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) ->
             ),
         }
     } else {
-        // `/D` sets the target directory, pinning the update to the directory
-        // the app runs from. NSIS requires it last and unquoted. A cargo
-        // build output is not an install, and pinning there would drop an
-        // installed copy and an uninstaller into the build directory, so the
-        // installer picks its own location in that case.
-        match exe.parent().filter(|dir| !is_cargo_build_output(dir)) {
-            Some(dir) => format!(
-                r#"start "" /wait "{}" /S /D={}"#,
-                installer.display(),
-                dir.display()
-            ),
-            None => format!(r#"start "" /wait "{}" /S"#, installer.display()),
-        }
+        // No `/D`: the setup knows where it installed itself, and forcing a
+        // directory is what put an install inside a build folder and left
+        // that path in the registry for the MSI to inherit.
+        format!(r#"start "" /wait "{}" /S"#, installer.display())
     };
 
     // Absolute paths: a developer's PATH often puts a Unix `find` (Git for
@@ -894,9 +885,11 @@ mod tests {
         assert!(setup.contains("goto waitloop"));
         // `start` cannot parse extended-length paths, so none may reach it.
         assert!(!setup.contains(r"\\?\"));
-        assert!(setup.contains(
-            r#"start "" /wait "C:\cache\noir-player-2.0.0-windows-x64-setup.exe" /S /D=C:\Program Files\Noir Player"#
-        ));
+        // No /D: the setup keeps its own install location, the way Zed leaves
+        // the directory to the installer that owns it.
+        assert!(setup
+            .contains(r#"start "" /wait "C:\cache\noir-player-2.0.0-windows-x64-setup.exe" /S"#));
+        assert!(!setup.contains("/D="));
         assert!(setup.contains(r#"start "" "C:\Program Files\Noir Player\noir_player.exe""#));
         assert!(setup.contains(r#"exit=%errorlevel% >> "C:\cache\update.install.log""#));
         assert!(setup.contains(r#"del "%~f0""#));
@@ -909,45 +902,31 @@ mod tests {
         ));
     }
 
-    /// Running from `cargo build` output is not an install, so the helper
-    /// must not pin the installer there: doing so drops an installed copy and
-    /// an uninstaller into the build directory.
+    /// Running from `cargo build` output is not an install: pointing an
+    /// installer there registers the build directory as the app's location,
+    /// which a later MSI then inherits through the registry.
     #[cfg(target_os = "windows")]
     #[test]
     fn a_build_directory_is_never_used_as_the_install_target() {
         let log = Path::new(r"C:\cache\update.install.log");
-        let setup = Path::new(r"C:\cache\setup.exe");
 
         for build in [
             r"C:\src\noir\target\debug\noir_player.exe",
             r"C:\src\noir\target\release\noir_player.exe",
             r"C:\src\noir\target\x86_64-pc-windows-msvc\release\noir_player.exe",
         ] {
-            let script = windows_install_script(7, setup, Path::new(build), log);
+            let script =
+                windows_install_script(7, Path::new(r"C:\cache\update.msi"), Path::new(build), log);
             assert!(
-                !script.contains("/D="),
-                "pinned the installer into the build directory: {build}"
+                !script.contains("INSTALLDIR="),
+                "pinned Windows Installer into the build directory: {build}"
             );
+            assert!(is_cargo_build_output(Path::new(build).parent().unwrap()));
         }
 
-        let installed = windows_install_script(
-            7,
-            setup,
-            Path::new(r"C:\Users\me\AppData\Local\Programs\Noir Player\noir_player.exe"),
-            log,
-        );
-        assert!(installed.contains(r"/D=C:\Users\me\AppData\Local\Programs\Noir Player"));
-
-        let msi_in_build = windows_install_script(
-            7,
-            Path::new(r"C:\cache\update.msi"),
-            Path::new(r"C:\src\noir\target\debug\noir_player.exe"),
-            log,
-        );
-        assert!(
-            !msi_in_build.contains("INSTALLDIR="),
-            "pinned Windows Installer into the build directory"
-        );
+        assert!(!is_cargo_build_output(Path::new(
+            r"C:\Users\me\AppData\Local\Programs\Noir Player"
+        )));
     }
 
     /// A per machine install has to be upgraded by Windows Installer. The

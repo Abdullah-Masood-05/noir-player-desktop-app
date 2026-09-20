@@ -574,16 +574,21 @@ fn lyrics_card(model: &NoirPlayerModel, is_light: bool) -> Div {
     v_flex()
         .w_full()
         .h(px(420.0))
-        .p(px(14.0))
-        .gap(px(10.0))
-        .rounded_xl()
-        .bg(dynamic_card(is_light))
+        .p(px(12.0))
+        .gap(px(8.0))
+        .rounded_lg()
+        .bg(if is_light {
+            dynamic_card(is_light)
+        } else {
+            white(0.05)
+        })
         .border_1()
         .border_color(dynamic_border(is_light))
         .child(
             div()
-                .text_base()
-                .font_weight(FontWeight::BOLD)
+                .px(px(4.0))
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
                 .text_color(dynamic_text(is_light))
                 .child("Lyrics"),
         )
@@ -598,7 +603,8 @@ fn lyrics_card(model: &NoirPlayerModel, is_light: bool) -> Div {
             )
             .into_any_element(),
             None => div()
-                .text_sm()
+                .px(px(4.0))
+                .text_xs()
                 .text_color(dynamic_muted(is_light))
                 .child("No lyrics are saved in this file's tags.")
                 .into_any_element(),

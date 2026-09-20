@@ -146,9 +146,13 @@ impl Collection {
     }
 }
 
-/// A single entry in the per-song action sheet.
-type SongAction =
-    std::rc::Rc<dyn Fn(&mut NoirPlayerModel, &mut Window, &mut Context<NoirPlayerModel>)>;
+/// The song an action sheet is open for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SongMenu {
+    pub index: usize,
+    /// Set when the sheet was opened from a playlist, which adds a remove action.
+    pub playlist: Option<String>,
+}
 
 /// A running update download. Dropping it cancels the transfer.
 struct UpdateJob {
@@ -212,6 +216,7 @@ pub struct NoirPlayerModel {
     discover_audio_job: Option<DiscoverAudioJob>,
     discover_cached: Vec<media::PreparedAudio>,
     discover_downloads: Vec<Track>,
+    pub song_menu: Option<SongMenu>,
     pub sort_mode: SortMode,
     pub sort_menu_open: bool,
     pub media_menu_open: bool,
@@ -320,6 +325,7 @@ impl NoirPlayerModel {
             discover_audio_job: None,
             discover_cached: Vec::new(),
             discover_downloads: Vec::new(),
+            song_menu: None,
             sort_mode: SortMode::TitleAsc,
             sort_menu_open: false,
             media_menu_open: false,
@@ -1116,134 +1122,20 @@ impl NoirPlayerModel {
         &mut self,
         index: usize,
         playlist: Option<String>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(track) = self.tracks.get(index) else {
+        if index >= self.tracks.len() {
             return;
-        };
-        let title = track.title.clone();
-        let subtitle = format!("{} · {}", track.artist, track.album);
-        let path = track.path.clone();
-        let favourite = self.is_favourite(index);
-        let weak = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            use crate::views::ui::{dynamic_row_hover, dynamic_subtitle, dynamic_text, icon_text};
-            use gpui_kit::assets::IconName as MusicIcon;
+        }
+        self.song_menu = Some(SongMenu { index, playlist });
+        cx.notify();
+    }
 
-            let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
-            // Rows rather than stacked buttons, so the sheet reads like the
-            // library's own menus instead of a stack of grey boxes.
-            let build = |id: &'static str,
-                         icon: MusicIcon,
-                         label: String,
-                         danger: bool,
-                         handler: SongAction| {
-                let weak = weak.clone();
-                h_flex()
-                    .id(id)
-                    .w_full()
-                    .h(px(40.0))
-                    .px(px(12.0))
-                    .gap(px(10.0))
-                    .items_center()
-                    .rounded_lg()
-                    .cursor_pointer()
-                    .text_color(if danger {
-                        crate::views::ui::red()
-                    } else {
-                        dynamic_text(is_light)
-                    })
-                    .hover(move |s| {
-                        s.bg(if danger {
-                            crate::views::ui::red_a(0.12)
-                        } else {
-                            dynamic_row_hover(is_light)
-                        })
-                    })
-                    .on_click({
-                        let handler = handler.clone();
-                        move |_, window, cx| {
-                            let handler = handler.clone();
-                            let _ = weak.update(cx, |this, cx| handler(this, window, cx));
-                            window.close_dialog(cx);
-                        }
-                    })
-                    .child(icon_text(icon, 16.0))
-                    .child(div().text_sm().child(label))
-            };
-            let playlist_name = playlist.clone();
-            let remove_path = path.clone();
-            dialog
-                .title(title.clone())
-                .child(
-                    v_flex()
-                        .gap(px(2.0))
-                        .child(
-                            div()
-                                .px(px(12.0))
-                                .pb(px(6.0))
-                                .text_sm()
-                                .text_color(dynamic_subtitle(is_light))
-                                .overflow_hidden()
-                                .text_ellipsis()
-                                .child(subtitle.clone()),
-                        )
-                        .child(build(
-                            "song-action-play",
-                            MusicIcon::Play,
-                            "Play now".to_string(),
-                            false,
-                            std::rc::Rc::new(move |this, _, cx| this.play_index(index, cx)),
-                        ))
-                        .child(build(
-                            "song-action-next",
-                            MusicIcon::ListStart,
-                            "Play next".to_string(),
-                            false,
-                            std::rc::Rc::new(move |this, _, cx| this.play_next(index, cx)),
-                        ))
-                        .child(build(
-                            "song-action-queue",
-                            MusicIcon::ListPlus,
-                            "Add to queue".to_string(),
-                            false,
-                            std::rc::Rc::new(move |this, _, cx| this.add_to_queue(index, cx)),
-                        ))
-                        .child(build(
-                            "song-action-favourite",
-                            MusicIcon::Heart,
-                            if favourite {
-                                "Remove from favourites".to_string()
-                            } else {
-                                "Add to favourites".to_string()
-                            },
-                            false,
-                            std::rc::Rc::new(move |this, _, cx| this.toggle_favourite(index, cx)),
-                        ))
-                        .child(build(
-                            "song-action-playlist",
-                            MusicIcon::ListMusic,
-                            "Add to playlist".to_string(),
-                            false,
-                            std::rc::Rc::new(move |this, window, cx| {
-                                this.add_to_playlist_dialog(index, window, cx)
-                            }),
-                        ))
-                        .children(playlist_name.map(|name| {
-                            build(
-                                "song-action-remove",
-                                MusicIcon::Trash,
-                                format!("Remove from {name}"),
-                                true,
-                                std::rc::Rc::new(move |this, _, cx| {
-                                    this.remove_from_playlist(&name, &remove_path, cx);
-                                }),
-                            )
-                        })),
-                )
-                .button_props(DialogButtonProps::default().ok_text("Close"))
-        });
+    pub fn close_song_menu(&mut self, cx: &mut Context<Self>) {
+        if self.song_menu.take().is_some() {
+            cx.notify();
+        }
     }
 
     pub fn is_favourite(&self, index: usize) -> bool {
@@ -1923,7 +1815,10 @@ impl Render for NoirPlayerModel {
                 let alt = event.keystroke.modifiers.alt;
 
                 if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                    if this.update_dialog_open {
+                    if this.song_menu.is_some() {
+                        this.close_song_menu(cx);
+                        cx.stop_propagation();
+                    } else if this.update_dialog_open {
                         this.update_dialog_open = false;
                         cx.notify();
                         cx.stop_propagation();
@@ -2055,6 +1950,9 @@ impl Render for NoirPlayerModel {
                 d.child(player_bar::player_bar(self, cx))
             })
             .children(dialog_layer)
+            .when(self.song_menu.is_some(), |d| {
+                d.child(crate::views::song_menu::render_song_menu(self, cx))
+            })
             .when(self.equalizer_open, |d| {
                 d.child(crate::views::equalizer::render_equalizer_modal(self, cx))
             })

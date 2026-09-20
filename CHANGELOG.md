@@ -4,6 +4,56 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.0.1]
+
+### Updates Installed From Inside the App
+
+Version 2.0.1 finishes the update flow. Where earlier builds detected a new
+release and sent you to GitHub, the app now downloads the installer for your
+platform, verifies it, and installs it on restart.
+
+### Highlights & New Features
+
+- **Download and Install In App**: The update dialog downloads the installer
+  for the running platform with a progress bar and a cancel action, then
+  offers "Restart and install". Windows and macOS install and reopen on their
+  own; Linux packages need root, so the verified download is handed to the
+  system package installer.
+- **Checksum Verification**: Every download is checked against the SHA256 the
+  release publishes, and a file whose digest does not match is deleted rather
+  than run.
+- **Matches How the App Was Installed**: On Windows a per machine install in
+  Program Files is upgraded by Windows Installer, while a per user install
+  takes the NSIS setup. Earlier builds always took the setup, which placed a
+  second copy elsewhere and left the shortcut opening the old version.
+- **Install Log**: The installer's exit code is written beside the download,
+  so a failed install leaves a trace instead of quietly reopening the old
+  build.
+
+### Fixes
+
+- The installer is launched with a plain absolute path. The extended-length
+  `\\?\` form that `canonicalize` produces cannot be parsed by `cmd`, so the
+  installer never started and the app simply reopened at its old version.
+- The install helper runs with a hidden console instead of detached, because
+  `start` needs a console to hand the installer to.
+- Running from a cargo build directory no longer pins the installer there.
+- On macOS the replacement bundle is staged and swapped in only after the copy
+  succeeds, so a failed update can no longer leave no app at all.
+- The greeting card uses a smaller corner radius, and the media and sort
+  pickers take the search field's background and border so the header reads as
+  one row of controls. Opening a picker slides its panel down.
+
+### Downloads
+
+- Windows (x64 MSI): `noir-player-2.0.1-windows-x64.msi`
+- Windows (x64 Setup): `noir-player-2.0.1-windows-x64-setup.exe`
+- macOS (Apple Silicon): `noir-player-2.0.1-macos-arm64.dmg`
+- Linux (Debian & Ubuntu): `noir-player-2.0.1-linux-x64.deb`
+- Linux (Fedora & RHEL): `noir-player-2.0.1-linux-x64.rpm`
+- Linux (Arch): `noir-player-2.0.1-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or `SHA256SUMS`
+
 ## [2.0.0]
 
 ### Desktop Shell, Letter-Grouped Songs, Up Next Queue & Now Playing Page

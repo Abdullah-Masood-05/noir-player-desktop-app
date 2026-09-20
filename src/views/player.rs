@@ -478,31 +478,41 @@ fn up_next_card(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPl
 
     v_flex()
         .w_full()
-        .p(px(14.0))
-        .gap(px(10.0))
-        .rounded_xl()
-        .bg(dynamic_card(is_light))
+        .p(px(10.0))
+        .gap(px(6.0))
+        .rounded_lg()
+        // A translucent panel, so the card sits on the page's red wash rather
+        // than punching an opaque block through it.
+        .bg(if is_light {
+            dynamic_card(is_light)
+        } else {
+            white(0.05)
+        })
         .border_1()
         .border_color(dynamic_border(is_light))
         .child(
             h_flex()
                 .items_center()
                 .justify_between()
+                .px(px(4.0))
+                .pb(px(2.0))
                 .child(
                     div()
-                        .text_base()
-                        .font_weight(FontWeight::BOLD)
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
                         .text_color(dynamic_text(is_light))
                         .child("Up Next"),
                 )
                 .child(
                     div()
                         .text_color(dynamic_muted(is_light))
-                        .child(icon_text(MusicIcon::ListMusic, 18.0)),
+                        .child(icon_text(MusicIcon::ListMusic, 16.0)),
                 ),
         )
         .children((upcoming.is_empty()).then(|| {
             div()
+                .px(px(4.0))
+                .py(px(2.0))
                 .text_xs()
                 .text_color(dynamic_muted(is_light))
                 .child("Nothing queued after this song.")
@@ -512,20 +522,20 @@ fn up_next_card(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPl
             let Some(track) = model.tracks.get(index) else {
                 return div().id(SharedString::from(format!("player-next-missing-{index}")));
             };
+            // No red edge here: in the queue rail that marks the playing
+            // song, and everything in this card is still to come.
             h_flex()
                 .id(SharedString::from(format!("player-next-{index}")))
                 .items_center()
                 .gap(px(10.0))
                 .p(px(6.0))
-                .rounded_lg()
+                .rounded_md()
                 .cursor_pointer()
-                .border_l_2()
-                .border_color(red_a(0.65))
                 .hover(move |s| s.bg(dynamic_row_hover(is_light)))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.play_collection(queue.clone(), index, cx);
                 }))
-                .child(artwork_thumb(track, 40.0))
+                .child(artwork_thumb(track, 38.0))
                 .child(
                     v_flex()
                         .flex_1()

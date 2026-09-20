@@ -56,12 +56,18 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
                 )),
         )
         .when(menus_open, |d| {
+            // This sits above the header, so a second click on a picker lands
+            // here. Swallowing the click closes the menu instead of letting
+            // the picker's own handler reopen what this just closed.
             d.child(
                 div()
                     .id("library-menu-backdrop")
                     .absolute()
                     .inset_0()
-                    .on_click(cx.listener(|this, _, _, cx| this.close_menus(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.close_menus(cx);
+                    })),
             )
         })
         .when(model.media_menu_open, |d| {

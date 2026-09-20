@@ -4,6 +4,30 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [1.2.1]
+
+### Automatic & Manual Update Checks, Settings Toggle & Update Modal
+
+Version 1.2.1 introduces automatic update checking on application launch, a configurable toggle and manual check action in Settings, and an in-app Update Modal dialog for notifying users of new releases.
+
+### Highlights & New Features
+
+- **Automatic Update Checking on Launch**: Automatically queries GitHub Releases in the background 3 seconds after startup without blocking the UI or audio playback.
+- **Configurable Settings Toggle**: Users can enable or disable automatic update checks at any time under Settings > About (and All). The preference is persisted in `playlists.json`.
+- **Manual "Check Now" Action**: Added a Software Update row in Settings showing real-time status (Up to date, Checking, Update Available, or Error) with a manual "Check Now" button.
+- **In-App Update Modal**: When a newer version is detected, an elegant dialog presents the new version, highlights, a direct "Download & Install" button opening the release in the default browser, and a "Later" button.
+- **Semver Release Detection**: Intelligent semantic version parsing and comparison ignoring pre-release metadata and tags.
+
+### Downloads
+
+- Windows (x64 MSI): `noir-player-1.2.1-windows-x64.msi`
+- Windows (x64 Setup): `noir-player-1.2.1-windows-x64-setup.exe`
+- macOS (Apple Silicon): `noir-player-1.2.1-macos-arm64.dmg`
+- Linux (Debian & Ubuntu): `noir-player-1.2.1-linux-x64.deb`
+- Linux (Fedora & RHEL): `noir-player-1.2.1-linux-x64.rpm`
+- Linux (Arch): `noir-player-1.2.1-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or `SHA256SUMS`
+
 ## [1.2.0]
 
 ### Multi-folder Library, Equalizer, Light Theme & Installers

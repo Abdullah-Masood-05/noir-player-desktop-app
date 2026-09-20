@@ -8,7 +8,7 @@
 
 This is the desktop version of [NoirPlayer for Android](https://github.com/Abdullah-Masood-05/NoirPlayer), rebuilt in Rust with GPUI Kit. It features both a rich red-and-dark theme with a crimson glowing top wash and an adaptive red-and-white light theme inspired by the mobile app, alongside multi-folder library scanning, a 5-band graphic equalizer, and Discover services.
 
-Version 1.2.0. See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
+Version 1.2.1. See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
 
 ## Playback and library
 
@@ -30,7 +30,7 @@ Noir Player provides two handcrafted themes:
 - **Dark Theme**: Deep black surfaces (`#0A0A0A` / `#161616`) with an atmospheric red aura top wash, crimson borders, and glowing red play accents.
 - **Light Theme**: Crisp white cards (`#FFFFFF`), subtle silver borders (`#E5E5E5`), clean neutral backgrounds (`#FAFAFA`), `#1A1A1A` charcoal typography, and vibrant red accents (`#D32F2F`), matching the mobile NoirPlayer design.
 
-Switch themes anytime via the theme toggle in the window header or inside **Settings** (`Ctrl+,`). Modals feature smooth entrance animations and backdrop scroll containment preventing background library items from scrolling while a dialog is active.
+Switch themes anytime via the theme toggle in the window header or inside **Settings** (`Ctrl+,`). Settings also allows managing library scan folders, custom download destinations, seeking intervals, and automatic or manual software update checks. Modals feature smooth entrance animations and backdrop scroll containment preventing background library items from scrolling while a dialog is active.
 
 ### Keyboard shortcuts
 

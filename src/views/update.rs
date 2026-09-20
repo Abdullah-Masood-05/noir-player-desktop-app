@@ -3,6 +3,7 @@ use gpui_kit::component::*;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
+use crate::update::UpdateStatus;
 use crate::views::ui::{
     backdrop_transition, icon_text, modal_transition, red, smooth_scroll, white,
 };
@@ -17,6 +18,7 @@ pub fn render_update_modal(
 ) -> impl IntoElement {
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let release = model.latest_release.clone();
+    let status = model.update_status.clone();
 
     let (version, name, notes, url) = match release {
         Some(ref r) => (
@@ -148,7 +150,7 @@ pub fn render_update_modal(
                             .child(
                                 div()
                                     .w_full()
-                                    .max_h(px(220.0))
+                                    .max_h(px(170.0))
                                     .rounded_xl()
                                     .bg(if is_light { c(0xF8F9FA) } else { c(0x16181D) })
                                     .border(px(1.0))
@@ -168,9 +170,10 @@ pub fn render_update_modal(
                                             })
                                             .children(render_notes_content(&notes, is_light)),
                                     )),
-                            ),
+                            )
+                            .children(progress_section(&status, is_light)),
                     )
-                    .child(modal_footer(url, is_light, cx)),
+                    .child(modal_footer(&status, url, is_light, cx)),
             )),
     )
 }
@@ -227,11 +230,147 @@ fn modal_header(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
         )
 }
 
-fn modal_footer(url: String, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
+/// Progress, verification and error detail below the release notes.
+fn progress_section(status: &UpdateStatus, is_light: bool) -> Option<Div> {
+    let note = |text: String, tone: Hsla| {
+        div()
+            .text_xs()
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(tone)
+            .child(text)
+    };
+    let muted = if is_light { c(0x52525B) } else { white(0.7) };
+
+    match status {
+        UpdateStatus::Downloading { received, total } => {
+            let fraction = if *total > 0 {
+                (*received as f32 / *total as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let percent = (fraction * 100.0).round() as u32;
+            Some(
+                v_flex()
+                    .w_full()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(6.0))
+                            .rounded_full()
+                            .bg(if is_light { c(0xE5E7EB) } else { c(0x24262C) })
+                            .overflow_hidden()
+                            .child(div().h_full().rounded_full().bg(red()).w(if *total > 0 {
+                                relative(fraction)
+                            } else {
+                                relative(0.35)
+                            })),
+                    )
+                    .child(note(
+                        if *total > 0 {
+                            format!(
+                                "Downloading {} of {} ({percent}%)",
+                                mib(*received),
+                                mib(*total)
+                            )
+                        } else {
+                            format!("Downloading {}", mib(*received))
+                        },
+                        muted,
+                    )),
+            )
+        }
+        UpdateStatus::Verifying => Some(
+            v_flex()
+                .w_full()
+                .child(note("Checking the download against the published checksum...".to_string(), muted)),
+        ),
+        UpdateStatus::Ready(path) => Some(
+            v_flex().w_full().gap(px(4.0)).child(note(
+                if crate::update::installs_in_place() {
+                    "Downloaded and verified. Noir Player will close while it installs, then reopen."
+                        .to_string()
+                } else {
+                    "Downloaded and verified. Your package manager takes it from here.".to_string()
+                },
+                muted,
+            ))
+            .child(note(
+                path.file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                if is_light { c(0x8E8E93) } else { white(0.45) },
+            )),
+        ),
+        UpdateStatus::Installing => Some(
+            v_flex()
+                .w_full()
+                .child(note("Starting the installer...".to_string(), muted)),
+        ),
+        UpdateStatus::Error(message) => Some(
+            v_flex()
+                .w_full()
+                .child(note(message.clone(), red())),
+        ),
+        _ => None,
+    }
+}
+
+fn mib(bytes: u64) -> String {
+    format!("{:.1} MiB", bytes as f64 / 1_048_576.0)
+}
+
+fn secondary_button(id: &'static str, label: &'static str, is_light: bool) -> Stateful<Div> {
+    div()
+        .id(id)
+        .px(px(14.0))
+        .py(px(7.0))
+        .rounded_lg()
+        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+        .border(px(1.0))
+        .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+        .text_xs()
+        .font_weight(FontWeight::BOLD)
+        .text_color(if is_light { c(0x52525B) } else { white(0.7) })
+        .cursor_pointer()
+        .hover(|s| s.opacity(0.85))
+        .child(label)
+}
+
+fn primary_button(
+    id: &'static str,
+    label: &'static str,
+    icon: MusicIcon,
+    is_light: bool,
+) -> Stateful<Div> {
+    let _ = is_light;
     h_flex()
+        .id(id)
+        .px(px(16.0))
+        .py(px(7.0))
+        .rounded_lg()
+        .bg(red())
+        .items_center()
+        .gap(px(6.0))
+        .text_xs()
+        .font_weight(FontWeight::BOLD)
+        .text_color(white(1.0))
+        .cursor_pointer()
+        .hover(|s| s.opacity(0.9))
+        .child(icon_text(icon, 14.0))
+        .child(label)
+}
+
+fn modal_footer(
+    status: &UpdateStatus,
+    url: String,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Div {
+    let footer = h_flex()
         .w_full()
         .items_center()
-        .justify_end()
+        .justify_between()
         .gap(px(10.0))
         .px(px(20.0))
         .py(px(14.0))
@@ -239,49 +378,113 @@ fn modal_footer(url: String, is_light: bool, cx: &mut Context<NoirPlayerModel>) 
         .border_color(if is_light { c(0xE4E4E7) } else { c(0x222428) })
         .child(
             div()
-                .id("update-dismiss-btn")
-                .px(px(14.0))
-                .py(px(7.0))
-                .rounded_lg()
-                .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
-                .border(px(1.0))
-                .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+                .id("update-release-page")
                 .text_xs()
-                .font_weight(FontWeight::BOLD)
-                .text_color(if is_light { c(0x52525B) } else { white(0.7) })
+                .text_color(if is_light { c(0x71717A) } else { white(0.45) })
                 .cursor_pointer()
-                .hover(|s| s.opacity(0.85))
+                .hover(|s| s.text_color(red()))
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    cx.open_url(&url);
+                })
+                .child("Release page"),
+        );
+
+    let actions = h_flex().items_center().gap(px(10.0));
+
+    let actions = match status {
+        UpdateStatus::Downloading { .. } | UpdateStatus::Verifying => actions.child(
+            secondary_button("update-cancel-btn", "Cancel", is_light).on_click(cx.listener(
+                |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.cancel_update_download(cx);
+                },
+            )),
+        ),
+        UpdateStatus::Ready(_) => actions
+            .child(
+                secondary_button("update-later-btn", "Later", is_light).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.update_dialog_open = false;
+                        cx.notify();
+                    },
+                )),
+            )
+            .child(
+                primary_button(
+                    "update-install-btn",
+                    if crate::update::installs_in_place() {
+                        "Restart and install"
+                    } else {
+                        "Open installer"
+                    },
+                    MusicIcon::RefreshCw,
+                    is_light,
+                )
                 .on_click(cx.listener(|this, _, _, cx| {
                     cx.stop_propagation();
-                    this.update_dialog_open = false;
-                    cx.notify();
-                }))
-                .child("Later"),
-        )
-        .child(
+                    this.install_update(cx);
+                })),
+            ),
+        UpdateStatus::Installing => actions.child(
             div()
-                .id("update-download-btn")
                 .px(px(16.0))
                 .py(px(7.0))
                 .rounded_lg()
-                .bg(red())
-                .flex()
-                .items_center()
-                .gap(px(6.0))
+                .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
-                .text_color(white(1.0))
-                .cursor_pointer()
-                .hover(|s| s.opacity(0.9))
-                .on_click(cx.listener(move |this, _, _, cx| {
+                .text_color(if is_light { c(0x71717A) } else { white(0.5) })
+                .child("Installing..."),
+        ),
+        UpdateStatus::Error(_) => actions
+            .child(
+                secondary_button("update-dismiss-btn", "Close", is_light).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.update_dialog_open = false;
+                        cx.notify();
+                    },
+                )),
+            )
+            .child(
+                primary_button(
+                    "update-retry-btn",
+                    "Try again",
+                    MusicIcon::RefreshCw,
+                    is_light,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
                     cx.stop_propagation();
-                    this.update_dialog_open = false;
-                    cx.open_url(&url);
-                    cx.notify();
-                }))
-                .child(icon_text(MusicIcon::Download, 14.0))
-                .child("Download & Install"),
-        )
+                    this.start_update_download(cx);
+                })),
+            ),
+        _ => actions
+            .child(
+                secondary_button("update-later-btn", "Later", is_light).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.update_dialog_open = false;
+                        cx.notify();
+                    },
+                )),
+            )
+            .child(
+                primary_button(
+                    "update-download-btn",
+                    "Download update",
+                    MusicIcon::Download,
+                    is_light,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.start_update_download(cx);
+                })),
+            ),
+    };
+
+    footer.child(actions)
 }
 
 fn render_notes_content(notes: &str, is_light: bool) -> Vec<Div> {

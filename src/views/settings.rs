@@ -6,7 +6,8 @@ use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
 use crate::views::ui::{
-    backdrop_transition, icon_text, modal_transition, red, smooth_scroll, white,
+    backdrop_transition, dynamic_inner_surface, dynamic_modal_surface, icon_text, modal_transition,
+    red, smooth_scroll, white,
 };
 
 fn c(hex: u32) -> Hsla {
@@ -98,7 +99,7 @@ pub fn render_settings_modal(
                     .w(px(720.0))
                     .h(px(580.0))
                     .rounded_2xl()
-                    .bg(if is_light { c(0xFFFFFF) } else { c(0x0D0D11) })
+                    .bg(dynamic_modal_surface(is_light))
                     .border(px(1.0))
                     .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2A2E) })
                     .shadow(vec![BoxShadow::new(
@@ -568,7 +569,7 @@ fn build_rows(
                                 .px(px(12.0))
                                 .py(px(6.0))
                                 .rounded_lg()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+                                .bg(dynamic_inner_surface(is_light))
                                 .border(px(1.0))
                                 .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                 .flex()
@@ -607,7 +608,7 @@ fn build_rows(
                             .px(px(8.0))
                             .py(px(3.0))
                             .rounded_md()
-                            .bg(if is_light { c(0xEDEDF0) } else { c(0x17171C) })
+                            .bg(dynamic_inner_surface(is_light))
                             .text_xs()
                             .text_color(if is_light { c(0x71717A) } else { white(0.5) })
                             .child("System Default"),
@@ -727,7 +728,7 @@ fn build_rows(
                                     .px(px(10.0))
                                     .py(px(6.0))
                                     .rounded_lg()
-                                    .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+                                    .bg(dynamic_inner_surface(is_light))
                                     .border(px(1.0))
                                     .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                     .text_xs()
@@ -818,7 +819,7 @@ fn build_rows(
                         .px(px(12.0))
                         .py(px(6.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+                        .bg(dynamic_inner_surface(is_light))
                         .border(px(1.0))
                         .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                         .flex()
@@ -952,7 +953,7 @@ fn build_rows(
                         .px(px(12.0))
                         .py(px(6.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+                        .bg(dynamic_inner_surface(is_light))
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(if is_light { c(0x71717A) } else { white(0.5) })
@@ -962,7 +963,7 @@ fn build_rows(
                         .px(px(12.0))
                         .py(px(6.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+                        .bg(dynamic_inner_surface(is_light))
                         .border(px(1.0))
                         .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                         .flex()
@@ -999,7 +1000,7 @@ fn build_rows(
                         .px(px(8.0))
                         .py(px(3.0))
                         .rounded_md()
-                        .bg(if is_light { c(0xEDEDF0) } else { c(0x17171C) })
+                        .bg(dynamic_inner_surface(is_light))
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
                         .text_color(red())
@@ -1155,7 +1156,7 @@ where
     h_flex()
         .items_center()
         .rounded_lg()
-        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+        .bg(dynamic_inner_surface(is_light))
         .border(px(1.0))
         .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
         .overflow_hidden()

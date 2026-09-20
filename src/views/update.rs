@@ -5,7 +5,8 @@ use gpui_kit::*;
 use crate::app::NoirPlayerModel;
 use crate::update::UpdateStatus;
 use crate::views::ui::{
-    backdrop_transition, icon_text, modal_transition, red, smooth_scroll, white,
+    backdrop_transition, dynamic_inner_surface, dynamic_modal_surface, icon_text, modal_transition,
+    red, smooth_scroll, white,
 };
 
 fn c(hex: u32) -> Hsla {
@@ -69,7 +70,7 @@ pub fn render_update_modal(
                     .w(px(540.0))
                     .max_h(px(520.0))
                     .rounded_2xl()
-                    .bg(if is_light { c(0xFFFFFF) } else { c(0x0D0D11) })
+                    .bg(dynamic_modal_surface(is_light))
                     .border(px(1.0))
                     .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2A2E) })
                     .shadow(vec![BoxShadow::new(
@@ -101,7 +102,7 @@ pub fn render_update_modal(
                                             .px(px(8.0))
                                             .py(px(3.0))
                                             .rounded_md()
-                                            .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+                                            .bg(dynamic_inner_surface(is_light))
                                             .text_xs()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(if is_light {
@@ -152,7 +153,7 @@ pub fn render_update_modal(
                                     .w_full()
                                     .max_h(px(170.0))
                                     .rounded_xl()
-                                    .bg(if is_light { c(0xFAFAFA) } else { c(0x111114) })
+                                    .bg(dynamic_inner_surface(is_light))
                                     .border(px(1.0))
                                     .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
                                     .p(px(12.0))
@@ -326,7 +327,7 @@ fn secondary_button(id: &'static str, label: &'static str, is_light: bool) -> St
         .px(px(14.0))
         .py(px(7.0))
         .rounded_lg()
-        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+        .bg(dynamic_inner_surface(is_light))
         .border(px(1.0))
         .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
         .text_xs()
@@ -432,7 +433,7 @@ fn modal_footer(
                 .px(px(16.0))
                 .py(px(7.0))
                 .rounded_lg()
-                .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
+                .bg(dynamic_inner_surface(is_light))
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .text_color(if is_light { c(0x71717A) } else { white(0.5) })

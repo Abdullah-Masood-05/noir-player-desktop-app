@@ -164,6 +164,26 @@ pub fn dynamic_card(is_light: bool) -> Hsla {
     }
 }
 
+/// Shell of a modal: the panel colour with a little of the dimmed app
+/// showing through, so a dialog sits in the window rather than on top of it.
+pub fn dynamic_modal_surface(is_light: bool) -> Hsla {
+    if is_light {
+        rgb(LIGHT_PANEL_BG).alpha(0.97).into()
+    } else {
+        rgb(PANEL_BG).alpha(0.90).into()
+    }
+}
+
+/// A raised surface inside a modal or panel, tinted from whatever is behind
+/// it rather than painted as its own opaque block.
+pub fn dynamic_inner_surface(is_light: bool) -> Hsla {
+    if is_light {
+        hsla(0.0, 0.0, 0.0, 0.04)
+    } else {
+        white(0.05)
+    }
+}
+
 /// A restrained hover tint for dense list rows.
 pub fn dynamic_row_hover(is_light: bool) -> Hsla {
     if is_light {

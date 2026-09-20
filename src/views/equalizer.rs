@@ -5,7 +5,10 @@ use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
 use crate::media::EQ_PRESETS;
-use crate::views::ui::{backdrop_transition, icon_text, modal_transition, red, white};
+use crate::views::ui::{
+    backdrop_transition, dynamic_inner_surface, dynamic_modal_surface, icon_text, modal_transition,
+    red, white,
+};
 
 fn c(hex: u32) -> Hsla {
     rgb(hex).into()
@@ -59,7 +62,7 @@ pub fn render_equalizer_modal(
                     .track_focus(&model.equalizer_focus_handle)
                     .w(px(660.0))
                     .rounded_2xl()
-                    .bg(if is_light { c(0xFFFFFF) } else { c(0x0D0D11) })
+                    .bg(dynamic_modal_surface(is_light))
                     .border(px(1.0))
                     .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2A2E) })
                     .shadow(vec![BoxShadow::new(
@@ -158,7 +161,7 @@ fn modal_header(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
                         .px(px(10.0))
                         .py(px(5.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x151519) })
+                        .bg(dynamic_inner_surface(is_light))
                         .border(px(1.0))
                         .border_color(if is_light { c(0xDEDEE1) } else { c(0x222227) })
                         .text_xs()
@@ -206,7 +209,7 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
         .py(px(14.0))
         .border_b(px(1.0))
         .border_color(if is_light { c(0xEDEDF0) } else { c(0x17171C) })
-        .bg(if is_light { c(0xFAFAFA) } else { c(0x101014) })
+        .bg(dynamic_inner_surface(is_light))
         .child(
             h_flex()
                 .items_center()
@@ -453,7 +456,7 @@ fn bands_section(
                         .gap(px(6.0))
                         .p(px(10.0))
                         .rounded_xl()
-                        .bg(if is_light { c(0xFAFAFA) } else { c(0x111115) })
+                        .bg(dynamic_inner_surface(is_light))
                         .border(px(1.0))
                         .border_color(if is_active {
                             red().alpha(0.5)
@@ -506,7 +509,7 @@ fn bands_section(
                             h_flex()
                                 .items_center()
                                 .rounded_lg()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x0C0C10) })
+                                .bg(dynamic_inner_surface(is_light))
                                 .border(px(1.0))
                                 .border_color(if is_light { c(0xDEDEE1) } else { c(0x202025) })
                                 .overflow_hidden()
@@ -633,7 +636,7 @@ fn modal_footer(is_light: bool) -> Div {
                                 .px(px(6.0))
                                 .py(px(1.0))
                                 .rounded_md()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x18181D) })
+                                .bg(dynamic_inner_surface(is_light))
                                 .border(px(1.0))
                                 .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                 .text_xs()
@@ -657,7 +660,7 @@ fn modal_footer(is_light: bool) -> Div {
                                 .px(px(6.0))
                                 .py(px(1.0))
                                 .rounded_md()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x18181D) })
+                                .bg(dynamic_inner_surface(is_light))
                                 .border(px(1.0))
                                 .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                 .text_xs()

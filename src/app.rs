@@ -112,6 +112,9 @@ pub struct NoirPlayerModel {
     pub settings_search: Entity<InputState>,
     pub settings_selected_index: usize,
     pub volume_hud_until: Option<std::time::Instant>,
+    pub update_status: crate::update::UpdateStatus,
+    pub update_dialog_open: bool,
+    pub latest_release: Option<crate::update::ReleaseInfo>,
     _subscriptions: Vec<Subscription>,
     dialog_subscription: Option<Subscription>,
 }
@@ -204,9 +207,21 @@ impl NoirPlayerModel {
             settings_category: crate::views::settings::SettingsCategory::All,
             settings_search,
             settings_selected_index: 0,
+            update_status: crate::update::UpdateStatus::Idle,
+            update_dialog_open: false,
+            latest_release: None,
             _subscriptions: subscriptions,
             dialog_subscription: None,
         };
+        if model.store.auto_check_updates {
+            cx.spawn(async move |this, cx| {
+                smol::Timer::after(Duration::from_secs(3)).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.check_for_updates(false, cx);
+                });
+            })
+            .detach();
+        }
         model.rescan(cx);
         model
     }
@@ -247,6 +262,39 @@ impl NoirPlayerModel {
 
     pub fn discover_audio_busy(&self) -> bool {
         self.discover_audio_job.is_some()
+    }
+
+    pub fn check_for_updates(&mut self, _manual: bool, cx: &mut Context<Self>) {
+        if self.update_status == crate::update::UpdateStatus::Checking {
+            return;
+        }
+        self.update_status = crate::update::UpdateStatus::Checking;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::update::check_latest_release(Duration::from_secs(10)) })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(Some(release)) => {
+                        this.latest_release = Some(release.clone());
+                        this.update_status = crate::update::UpdateStatus::Available(release);
+                        this.update_dialog_open = true;
+                    }
+                    Ok(None) => {
+                        this.update_status = crate::update::UpdateStatus::UpToDate;
+                    }
+                    Err(error) => {
+                        this.update_status = crate::update::UpdateStatus::Error(error.to_string());
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn cancel_discover_audio(&mut self, cx: &mut Context<Self>) {
@@ -1186,7 +1234,11 @@ impl Render for NoirPlayerModel {
                 let alt = event.keystroke.modifiers.alt;
 
                 if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                    if this.equalizer_open {
+                    if this.update_dialog_open {
+                        this.update_dialog_open = false;
+                        cx.notify();
+                        cx.stop_propagation();
+                    } else if this.equalizer_open {
                         this.close_equalizer(cx);
                         cx.stop_propagation();
                     } else if this.settings_open {
@@ -1204,6 +1256,7 @@ impl Render for NoirPlayerModel {
                     && !alt
                     && !this.settings_open
                     && !this.equalizer_open
+                    && !this.update_dialog_open
                 {
                     if k.eq_ignore_ascii_case("p") || k == " " || k.eq_ignore_ascii_case("space") {
                         this.toggle_play(cx);
@@ -1296,6 +1349,9 @@ impl Render for NoirPlayerModel {
             })
             .when(self.settings_open, |d| {
                 d.child(crate::views::settings::render_settings_modal(self, cx))
+            })
+            .when(self.update_dialog_open, |d| {
+                d.child(crate::views::update::render_update_modal(self, cx))
             })
             .when(show_volume_hud, |d| {
                 d.child(volume_hud(self.volume, is_light))

@@ -4,6 +4,7 @@ mod api;
 mod app;
 mod config;
 mod media;
+pub mod update;
 mod views;
 mod widgets;
 

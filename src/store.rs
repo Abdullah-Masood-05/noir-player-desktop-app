@@ -33,6 +33,8 @@ pub struct Store {
     pub resume_last_song: bool,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    #[serde(default = "default_auto_check_updates")]
+    pub auto_check_updates: bool,
 }
 
 fn default_seek_interval() -> u32 {
@@ -59,6 +61,10 @@ fn default_volume() -> f32 {
     0.9
 }
 
+fn default_auto_check_updates() -> bool {
+    true
+}
+
 impl Default for Store {
     fn default() -> Self {
         Self {
@@ -74,6 +80,7 @@ impl Default for Store {
             download_folder: None,
             resume_last_song: true,
             volume: 0.9,
+            auto_check_updates: true,
         }
     }
 }

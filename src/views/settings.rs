@@ -742,8 +742,8 @@ fn build_rows(
 
     // ── About rows ──────────────────────────────────────────────────────────────
     let ab_visible = cat == SettingsCategory::All || cat == SettingsCategory::About;
-    let ab_match =
-        query.is_empty() || "about noir player version info help shortcuts".contains(query);
+    let ab_match = query.is_empty()
+        || "about noir player version info help shortcuts update updates".contains(query);
 
     if ab_visible && ab_match {
         let active = idx == selected;
@@ -830,6 +830,131 @@ fn build_rows(
                         .child(icon_text(MusicIcon::ExternalLink, 13.0))
                         .child("GitHub"),
                 )
+                .into_any_element(),
+        );
+        idx += 1;
+
+        // Automatic Updates Toggle
+        let auto_update = model.store.auto_check_updates;
+        let active = idx == selected;
+        rows.push(
+            row_base(idx, active, is_light, cx)
+                .justify_between()
+                .child(label_cell(
+                    "Automatic Updates",
+                    "Check for new releases automatically when Noir Player launches",
+                    is_light,
+                ))
+                .child(toggle_switch(
+                    "auto-update-toggle",
+                    auto_update,
+                    is_light,
+                    cx,
+                    |this, _, _, cx| {
+                        this.store.auto_check_updates = !this.store.auto_check_updates;
+                        this.save_current_store(cx);
+                    },
+                ))
+                .into_any_element(),
+        );
+        idx += 1;
+
+        // Software Update Check Row
+        let update_status = model.update_status.clone();
+        let (status_text, is_available, is_checking) = match update_status {
+            crate::update::UpdateStatus::Idle => (
+                format!(
+                    "Noir Player v{} is installed \u{2022} Tap Check Now to verify",
+                    env!("CARGO_PKG_VERSION")
+                ),
+                false,
+                false,
+            ),
+            crate::update::UpdateStatus::Checking => (
+                "Checking GitHub Releases for updates...".to_string(),
+                false,
+                true,
+            ),
+            crate::update::UpdateStatus::UpToDate => (
+                format!("Noir Player v{} is up to date", env!("CARGO_PKG_VERSION")),
+                false,
+                false,
+            ),
+            crate::update::UpdateStatus::Available(ref r) => (
+                format!(
+                    "Update available: v{} \u{2014} Tap to view release notes",
+                    r.version
+                ),
+                true,
+                false,
+            ),
+            crate::update::UpdateStatus::Error(ref e) => {
+                (format!("Update check failed: {e}"), false, false)
+            }
+        };
+
+        let active = idx == selected;
+        rows.push(
+            row_base(idx, active, is_light, cx)
+                .justify_between()
+                .child(label_cell("Software Update", &status_text, is_light))
+                .child(if is_available {
+                    div()
+                        .id("view-update-btn")
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .rounded_lg()
+                        .bg(red())
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(white(1.0))
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.88))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.update_dialog_open = true;
+                            cx.notify();
+                        }))
+                        .child(icon_text(MusicIcon::Sparkles, 13.0))
+                        .child("View Update")
+                } else if is_checking {
+                    div()
+                        .id("checking-update-btn")
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .rounded_lg()
+                        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(if is_light { c(0x71717A) } else { white(0.5) })
+                        .child("Checking...")
+                } else {
+                    div()
+                        .id("check-update-btn")
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .rounded_lg()
+                        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                        .border(px(1.0))
+                        .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+                        .flex()
+                        .items_center()
+                        .gap(px(5.0))
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(if is_light { c(0x18181B) } else { white(0.9) })
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.85))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.check_for_updates(true, cx);
+                        }))
+                        .child(icon_text(MusicIcon::RotateCw, 13.0))
+                        .child("Check Now")
+                })
                 .into_any_element(),
         );
         idx += 1;

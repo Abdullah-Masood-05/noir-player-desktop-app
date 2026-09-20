@@ -7,9 +7,9 @@ use gpui_kit::*;
 use crate::app::{Collection, LibraryTab, NoirPlayerModel, SortMode};
 use crate::media::Track;
 use crate::views::ui::{
-    dynamic_border, dynamic_card, dynamic_divider, dynamic_hover, dynamic_muted, dynamic_panel,
+    dynamic_border, dynamic_divider, dynamic_hover, dynamic_muted, dynamic_panel,
     dynamic_row_hover, dynamic_subtitle, dynamic_text, format_duration, icon_text, img_from_bytes,
-    red, red_a, smooth_scroll, tab_transition, top_fade, waveform, white,
+    menu_transition, red, red_a, smooth_scroll, tab_transition, top_fade, waveform, white,
 };
 
 const CONTENT_PADDING: f32 = 24.0;
@@ -65,10 +65,16 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
             )
         })
         .when(model.media_menu_open, |d| {
-            d.child(media_menu(model, is_light, cx))
+            d.child(menu_transition(
+                "media-menu-anim",
+                media_menu(model, is_light, cx),
+            ))
         })
         .when(model.sort_menu_open, |d| {
-            d.child(sort_menu(model, is_light, cx))
+            d.child(menu_transition(
+                "sort-menu-anim",
+                sort_menu(model, is_light, cx),
+            ))
         })
 }
 
@@ -87,6 +93,7 @@ fn header(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPlayerMo
         },
     };
     let in_detail = model.library_detail.is_some() || model.library_tab == LibraryTab::AllSongs;
+    let field = FieldStyle::of(cx);
 
     h_flex()
         .w_full()
@@ -153,6 +160,7 @@ fn header(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPlayerMo
                     MEDIA_BUTTON_WIDTH,
                     model.media_menu_open,
                     is_light,
+                    field,
                     cx.listener(|this, _, _, cx| {
                         this.media_menu_open = !this.media_menu_open;
                         this.sort_menu_open = false;
@@ -165,6 +173,7 @@ fn header(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPlayerMo
                     SORT_BUTTON_WIDTH,
                     model.sort_menu_open,
                     is_light,
+                    field,
                     cx.listener(|this, _, _, cx| {
                         this.sort_menu_open = !this.sort_menu_open;
                         this.media_menu_open = false;
@@ -216,12 +225,31 @@ fn media_filter_label(model: &NoirPlayerModel) -> String {
     }
 }
 
+/// Surface shared by the search field and the pickers beside it, so the
+/// header reads as one row of controls.
+#[derive(Clone, Copy)]
+struct FieldStyle {
+    background: Hsla,
+    border: Hsla,
+}
+
+impl FieldStyle {
+    fn of(cx: &App) -> Self {
+        Self {
+            background: cx.theme().input_background(),
+            border: cx.theme().input,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn picker_button(
     id: &'static str,
     label: &str,
     width: f32,
     open: bool,
     is_light: bool,
+    field: FieldStyle,
     handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     h_flex()
@@ -234,12 +262,8 @@ fn picker_button(
         .rounded_lg()
         .cursor_pointer()
         .border_1()
-        .border_color(if open {
-            red_a(0.6)
-        } else {
-            dynamic_border(is_light)
-        })
-        .bg(dynamic_card(is_light))
+        .border_color(if open { red_a(0.6) } else { field.border })
+        .bg(field.background)
         .text_color(dynamic_text(is_light))
         .hover(move |s| s.border_color(red_a(0.45)))
         .on_click(handler)
@@ -462,7 +486,7 @@ fn hero(model: &NoirPlayerModel, is_light: bool) -> Div {
     div()
         .w_full()
         .h(px(126.0))
-        .rounded_2xl()
+        .rounded_lg()
         .relative()
         .overflow_hidden()
         .bg(if is_light {
@@ -482,7 +506,7 @@ fn hero(model: &NoirPlayerModel, is_light: bool) -> Div {
             div()
                 .absolute()
                 .inset_0()
-                .rounded_2xl()
+                .rounded_lg()
                 .bg(linear_gradient(
                     90.0,
                     linear_color_stop(red_a(if is_light { 0.16 } else { 0.30 }), 0.0),

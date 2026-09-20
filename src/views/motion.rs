@@ -42,6 +42,23 @@ pub fn modal_transition(id: impl Into<ElementId>, content: impl IntoElement) -> 
         .into_any_element()
 }
 
+/// Drops a dropdown panel into place. The panel positions itself absolutely,
+/// so the slide uses a margin: touching `position` here would detach it from
+/// the corner it is anchored to.
+pub fn menu_transition(id: impl Into<ElementId>, panel: Div) -> AnyElement {
+    panel
+        .with_animation(
+            id,
+            Animation::new(Duration::from_millis(140)).with_easing(ease_out_quint),
+            move |element, progress| {
+                element
+                    .mt(px((1.0 - progress) * -8.0))
+                    .opacity(progress.clamp(0.0, 1.0))
+            },
+        )
+        .into_any_element()
+}
+
 pub fn backdrop_transition(id: impl Into<ElementId>, content: impl IntoElement) -> AnyElement {
     div()
         .absolute()

@@ -6,8 +6,8 @@ pub mod motion;
 
 #[allow(unused_imports)]
 pub use motion::{
-    backdrop_transition, bubble_pop_item, bubbly_pop, bubbly_spring, modal_transition,
-    smooth_scroll, tab_transition,
+    backdrop_transition, bubble_pop_item, bubbly_pop, bubbly_spring, menu_transition,
+    modal_transition, smooth_scroll, tab_transition,
 };
 
 pub const RED: u32 = 0xE53935;

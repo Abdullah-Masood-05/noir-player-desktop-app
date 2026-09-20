@@ -205,26 +205,75 @@ fn linux_package_extension() -> &'static str {
 
 /// Picks the release asset that this platform can install.
 pub fn platform_asset(assets: &[ReleaseAsset]) -> Option<&ReleaseAsset> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_asset(assets, install_scope())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let find = |suffix: &str| {
+            assets
+                .iter()
+                .find(|asset| asset.name.to_ascii_lowercase().ends_with(suffix))
+        };
+        #[cfg(target_os = "macos")]
+        {
+            find(".dmg")
+        }
+        #[cfg(target_os = "linux")]
+        {
+            find(linux_package_extension())
+                .or_else(|| find(".deb"))
+                .or_else(|| find(".rpm"))
+        }
+    }
+}
+
+/// How the running copy of the app was installed on Windows. The two
+/// installers land in different places, so updating the copy the user
+/// actually launches means matching the one it came from.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallScope {
+    /// A per user NSIS install, under a directory this account can write.
+    PerUser,
+    /// A per machine MSI install, typically under Program Files.
+    PerMachine,
+}
+
+/// Probes the directory the app runs from. A directory this account cannot
+/// write to means a per machine install, which the MSI upgrades in place.
+#[cfg(target_os = "windows")]
+pub fn install_scope() -> InstallScope {
+    let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
+        return InstallScope::PerUser;
+    };
+    let probe = dir.join(".noir-update-probe");
+    match std::fs::File::create(&probe) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            InstallScope::PerUser
+        }
+        Err(_) => InstallScope::PerMachine,
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_asset(assets: &[ReleaseAsset], scope: InstallScope) -> Option<&ReleaseAsset> {
     let find = |suffix: &str| {
         assets
             .iter()
             .find(|asset| asset.name.to_ascii_lowercase().ends_with(suffix))
     };
-
-    #[cfg(target_os = "windows")]
-    {
-        // The NSIS setup runs unattended with /S; the MSI is the fallback.
-        find("-setup.exe").or_else(|| find(".msi"))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        find(".dmg")
-    }
-    #[cfg(target_os = "linux")]
-    {
-        find(linux_package_extension())
-            .or_else(|| find(".deb"))
-            .or_else(|| find(".rpm"))
+    match scope {
+        // The NSIS setup installs per user and runs unattended with /S.
+        InstallScope::PerUser => find("-setup.exe").or_else(|| find(".msi")),
+        // Windows Installer upgrades the existing per machine install in
+        // place, asking for elevation itself.
+        InstallScope::PerMachine => find(".msi").or_else(|| find("-setup.exe")),
     }
 }
 
@@ -434,25 +483,39 @@ pub fn find_checksum(text: &str, asset_name: &str) -> Option<String> {
 /// process. The caller is expected to quit immediately afterwards: the helper
 /// waits for this process to exit before touching any installed files.
 pub fn launch_installer(installer: &Path) -> Result<()> {
-    let installer = installer
-        .canonicalize()
-        .unwrap_or_else(|_| installer.to_path_buf());
+    let installer = plain_absolute(installer);
     if !installer.is_file() {
         bail!("The downloaded installer is missing.");
     }
     spawn_installer(&installer)
 }
 
+/// An absolute path without the `\\?\` prefix that `canonicalize` adds on
+/// Windows: `cmd` and its `start` command cannot parse extended-length paths
+/// and fail to find the file.
+fn plain_absolute(path: &Path) -> PathBuf {
+    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    match resolved
+        .to_str()
+        .and_then(|text| text.strip_prefix(r"\\?\"))
+    {
+        Some(plain) => PathBuf::from(plain),
+        None => resolved,
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn spawn_installer(installer: &Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
 
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    // A hidden console, not a detached process: `start` needs a console to
+    // hand the installer to, and detaching leaves it without one.
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     let exe = std::env::current_exe().context("Could not locate the running application")?;
-    let script = windows_install_script(std::process::id(), installer, &exe);
+    let log = installer.with_extension("install.log");
+    let script = windows_install_script(std::process::id(), installer, &exe, &log);
     let script_path = installer.with_extension("install.cmd");
     std::fs::write(&script_path, script)
         .with_context(|| format!("Could not write {}", script_path.display()))?;
@@ -460,27 +523,39 @@ fn spawn_installer(installer: &Path) -> Result<()> {
     std::process::Command::new("cmd")
         .arg("/C")
         .arg(&script_path)
-        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+        .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
         .spawn()
         .context("Could not start the installer")?;
     Ok(())
 }
 
-/// Batch helper that waits for the app to exit, installs without prompting,
-/// starts the new build and deletes itself. tauri-bundler's NSIS setup
-/// installs per user, so `/S` needs no elevation.
+/// Batch helper that waits for the app to exit, installs it, starts the new
+/// build and deletes itself. The NSIS setup installs per user and runs
+/// unattended under `/S`; Windows Installer upgrades a per machine install
+/// and asks for elevation on its own. The exit code is logged either way, so
+/// a failed install leaves a trace instead of silently reopening the old
+/// build.
 #[cfg(target_os = "windows")]
-fn windows_install_script(pid: u32, installer: &Path, exe: &Path) -> String {
+fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) -> String {
     let is_msi = installer
         .extension()
         .is_some_and(|extension| extension.eq_ignore_ascii_case("msi"));
     let run = if is_msi {
         format!(
-            "start \"\" /wait msiexec /i \"{}\" /passive /norestart",
+            r#"start "" /wait %SystemRoot%\System32\msiexec.exe /i "{}" /passive /norestart"#,
             installer.display()
         )
     } else {
-        format!("start \"\" /wait \"{}\" /S", installer.display())
+        // `/D` sets the target directory, pinning the update to the directory
+        // the app runs from. NSIS requires it last and unquoted.
+        match exe.parent() {
+            Some(dir) => format!(
+                r#"start "" /wait "{}" /S /D={}"#,
+                installer.display(),
+                dir.display()
+            ),
+            None => format!(r#"start "" /wait "{}" /S"#, installer.display()),
+        }
     };
 
     // Absolute paths: a developer's PATH often puts a Unix `find` (Git for
@@ -498,6 +573,10 @@ fn windows_install_script(pid: u32, installer: &Path, exe: &Path) -> String {
         "goto waitloop".to_string(),
         ")".to_string(),
         run,
+        format!(
+            r#"echo [%date% %time%] installer exit=%errorlevel% >> "{}""#,
+            log.display()
+        ),
         format!(r#"if exist "{0}" start "" "{0}""#, exe.display()),
         // Leaving the batch context first lets the script delete itself.
         r#"(goto) 2>nul & del "%~f0""#.to_string(),
@@ -529,17 +608,39 @@ fn spawn_installer(installer: &Path) -> Result<()> {
     }) {
         Some(bundle) => {
             let parent = bundle.parent().unwrap_or(Path::new("/Applications"));
+            // The new bundle is staged beside the old one and only swapped in
+            // once the copy succeeded, so a failed copy cannot leave the user
+            // with no app at all. The old bundle moves aside rather than being
+            // deleted outright, and is restored if the swap fails.
             format!(
                 "#!/bin/sh\n\
+                 LOG='{log}'\n\
                  while kill -0 {pid} 2>/dev/null; do sleep 1; done\n\
                  MOUNT=\"$(mktemp -d)\"\n\
+                 STAGE='{parent}/.noir-player-update.app'\n\
+                 OLD='{parent}/.noir-player-previous.app'\n\
                  if hdiutil attach -nobrowse -quiet -mountpoint \"$MOUNT\" '{dmg}'; then\n\
                  NEW=\"$(ls -d \"$MOUNT\"/*.app 2>/dev/null | head -n 1)\"\n\
                  if [ -n \"$NEW\" ]; then\n\
-                 rm -rf '{bundle}'\n\
-                 cp -R \"$NEW\" '{parent}/'\n\
+                 rm -rf \"$STAGE\" \"$OLD\"\n\
+                 if cp -R \"$NEW\" \"$STAGE\"; then\n\
+                 if mv '{bundle}' \"$OLD\" && mv \"$STAGE\" '{bundle}'; then\n\
+                 rm -rf \"$OLD\"\n\
+                 echo \"installed {version}\" >> \"$LOG\"\n\
+                 else\n\
+                 mv \"$OLD\" '{bundle}' 2>/dev/null\n\
+                 rm -rf \"$STAGE\"\n\
+                 echo 'swap failed, kept the existing app' >> \"$LOG\"\n\
+                 fi\n\
+                 else\n\
+                 echo 'copy from the disk image failed' >> \"$LOG\"\n\
+                 fi\n\
+                 else\n\
+                 echo 'no app bundle inside the disk image' >> \"$LOG\"\n\
                  fi\n\
                  hdiutil detach -quiet \"$MOUNT\"\n\
+                 else\n\
+                 echo 'could not mount the disk image' >> \"$LOG\"\n\
                  fi\n\
                  rmdir \"$MOUNT\" 2>/dev/null\n\
                  open '{bundle}' 2>/dev/null || open '{dmg}'\n\
@@ -547,6 +648,11 @@ fn spawn_installer(installer: &Path) -> Result<()> {
                 dmg = installer.display(),
                 bundle = bundle.display(),
                 parent = parent.display(),
+                log = installer.with_extension("install.log").display(),
+                version = installer
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default(),
             )
         }
         None => format!(
@@ -732,11 +838,13 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_helper_waits_then_installs_and_relaunches() {
-        let exe = Path::new(r"C:\Apps\Noir Player\noir_player.exe");
+        let exe = Path::new(r"C:\Program Files\Noir Player\noir_player.exe");
+        let log = Path::new(r"C:\cache\update.install.log");
         let setup = windows_install_script(
             4242,
             Path::new(r"C:\cache\noir-player-2.0.0-windows-x64-setup.exe"),
             exe,
+            log,
         );
         assert!(setup.contains(r#"\tasklist.exe /FI "PID eq 4242""#));
         // The Windows tools are addressed absolutely so a Unix `find` earlier
@@ -744,13 +852,52 @@ mod tests {
         assert!(setup.contains(r"%SystemRoot%\System32\find.exe"));
         assert!(!setup.contains("| find \""));
         assert!(setup.contains("goto waitloop"));
-        assert!(setup
-            .contains(r#"start "" /wait "C:\cache\noir-player-2.0.0-windows-x64-setup.exe" /S"#));
-        assert!(setup.contains(r#"start "" "C:\Apps\Noir Player\noir_player.exe""#));
+        // `start` cannot parse extended-length paths, so none may reach it.
+        assert!(!setup.contains(r"\\?\"));
+        assert!(setup.contains(
+            r#"start "" /wait "C:\cache\noir-player-2.0.0-windows-x64-setup.exe" /S /D=C:\Program Files\Noir Player"#
+        ));
+        assert!(setup.contains(r#"start "" "C:\Program Files\Noir Player\noir_player.exe""#));
+        assert!(setup.contains(r#"exit=%errorlevel% >> "C:\cache\update.install.log""#));
         assert!(setup.contains(r#"del "%~f0""#));
 
-        let msi = windows_install_script(1, Path::new(r"C:\cache\update.msi"), exe);
-        assert!(msi.contains(r#"msiexec /i "C:\cache\update.msi" /passive /norestart"#));
+        let msi = windows_install_script(1, Path::new(r"C:\cache\update.msi"), exe, log);
+        assert!(msi.contains(
+            r#"start "" /wait %SystemRoot%\System32\msiexec.exe /i "C:\cache\update.msi" /passive /norestart"#
+        ));
+    }
+
+    /// A per machine install has to be upgraded by Windows Installer. The
+    /// NSIS setup would drop a second per user copy elsewhere and leave the
+    /// shortcut opening the old build.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_asset_follows_the_install_scope() {
+        let assets = vec![
+            asset("noir-player-2.0.0-windows-x64.msi"),
+            asset("noir-player-2.0.0-windows-x64-setup.exe"),
+        ];
+        assert_eq!(
+            windows_asset(&assets, InstallScope::PerMachine).map(|a| a.name.as_str()),
+            Some("noir-player-2.0.0-windows-x64.msi")
+        );
+        assert_eq!(
+            windows_asset(&assets, InstallScope::PerUser).map(|a| a.name.as_str()),
+            Some("noir-player-2.0.0-windows-x64-setup.exe")
+        );
+
+        let only_setup = vec![asset("noir-player-2.0.0-windows-x64-setup.exe")];
+        assert!(windows_asset(&only_setup, InstallScope::PerMachine).is_some());
+    }
+
+    #[test]
+    fn plain_absolute_strips_the_extended_length_prefix() {
+        let plain = plain_absolute(&std::env::temp_dir());
+        assert!(
+            !plain.to_string_lossy().starts_with(r"\\?\"),
+            "{} keeps the prefix cmd cannot read",
+            plain.display()
+        );
     }
 
     #[test]

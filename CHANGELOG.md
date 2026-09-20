@@ -15,7 +15,8 @@ Version 1.2.1 introduces automatic update checking on application launch, a conf
 - **Automatic Update Checking on Launch**: Automatically queries GitHub Releases in the background 3 seconds after startup without blocking the UI or audio playback.
 - **Configurable Settings Toggle**: Users can enable or disable automatic update checks at any time under Settings > About (and All). The preference is persisted in `playlists.json`.
 - **Manual "Check Now" Action**: Added a Software Update row in Settings showing real-time status (Up to date, Checking, Update Available, or Error) with a manual "Check Now" button.
-- **In-App Update Modal**: When a newer version is detected, an elegant dialog presents the new version, highlights, a direct "Download & Install" button opening the release in the default browser, and a "Later" button.
+- **In-App Update Modal**: When a newer version is detected, a dialog presents the new version and its release highlights, with "Download update" and "Later" buttons.
+- **Download, Verify and Install in the App**: The update dialog downloads the installer for the running platform with a progress bar, checks it against the SHA256 published with the release, and deletes it if the digest does not match. "Restart and install" then hands the verified file to a helper that waits for the app to close, installs it and starts the new build. On Windows that is the NSIS setup run silently or the MSI through msiexec; on macOS the app bundle is replaced from the disk image; Linux packages need root, so the download is passed to the system package installer.
 - **Semver Release Detection**: Intelligent semantic version parsing and comparison ignoring pre-release metadata and tags.
 
 ### Downloads

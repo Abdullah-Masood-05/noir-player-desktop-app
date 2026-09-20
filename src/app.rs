@@ -2045,9 +2045,9 @@ fn volume_hud(volume: f32, is_light: bool) -> Div {
                 .px(px(16.0))
                 .py(px(8.0))
                 .rounded_full()
-                .bg(if is_light { c(0xFFFFFF) } else { c(0x181A20) })
+                .bg(if is_light { c(0xFFFFFF) } else { c(0x131317) })
                 .border(px(1.0))
-                .border_color(if is_light { c(0xE4E4E7) } else { c(0x2E323D) })
+                .border_color(if is_light { c(0xE4E4E7) } else { c(0x2E2E33) })
                 .shadow(vec![BoxShadow::new(
                     px(0.0),
                     px(8.0),
@@ -2068,7 +2068,7 @@ fn volume_hud(volume: f32, is_light: bool) -> Div {
                         .w(px(110.0))
                         .h(px(6.0))
                         .rounded_full()
-                        .bg(if is_light { c(0xE5E7EB) } else { c(0x282C37) })
+                        .bg(if is_light { c(0xE4E4E7) } else { c(0x222227) })
                         .overflow_hidden()
                         .child(
                             div()

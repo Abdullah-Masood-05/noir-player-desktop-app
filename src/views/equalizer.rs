@@ -59,9 +59,9 @@ pub fn render_equalizer_modal(
                     .track_focus(&model.equalizer_focus_handle)
                     .w(px(660.0))
                     .rounded_2xl()
-                    .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
+                    .bg(if is_light { c(0xFFFFFF) } else { c(0x0D0D11) })
                     .border(px(1.0))
-                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
+                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2A2E) })
                     .shadow(vec![BoxShadow::new(
                         px(0.0),
                         px(24.0),
@@ -112,7 +112,7 @@ fn modal_header(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
         .px(px(20.0))
         .py(px(16.0))
         .border_b(px(1.0))
-        .border_color(if is_light { c(0xE4E4E7) } else { c(0x20222A) })
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x1A1A1F) })
         .child(
             h_flex()
                 .items_center()
@@ -158,9 +158,9 @@ fn modal_header(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
                         .px(px(10.0))
                         .py(px(5.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x1A1C22) })
+                        .bg(if is_light { c(0xF0F1F3) } else { c(0x151519) })
                         .border(px(1.0))
-                        .border_color(if is_light { c(0xDCDEE2) } else { c(0x282B33) })
+                        .border_color(if is_light { c(0xDEDEE1) } else { c(0x222227) })
                         .text_xs()
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(if is_light { c(0x3F3F46) } else { white(0.7) })
@@ -205,8 +205,8 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
         .px(px(20.0))
         .py(px(14.0))
         .border_b(px(1.0))
-        .border_color(if is_light { c(0xEDEAEF) } else { c(0x1C1F26) })
-        .bg(if is_light { c(0xF9FAFB) } else { c(0x13151A) })
+        .border_color(if is_light { c(0xEDEDF0) } else { c(0x17171C) })
+        .bg(if is_light { c(0xFAFAFA) } else { c(0x101014) })
         .child(
             h_flex()
                 .items_center()
@@ -219,9 +219,9 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
                             red()
                         } else {
                             if is_light {
-                                c(0x9CA3AF)
+                                c(0xA1A1AA)
                             } else {
-                                c(0x444752)
+                                c(0x444448)
                             }
                         })
                         .when(enabled, |d| {
@@ -272,9 +272,9 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
                     red()
                 } else {
                     if is_light {
-                        c(0xD1D5DB)
+                        c(0xD4D4D8)
                     } else {
-                        c(0x2C2E38)
+                        c(0x2C2C31)
                     }
                 })
                 .p(px(2.0))
@@ -305,7 +305,7 @@ fn master_toggle_section(enabled: bool, is_light: bool, cx: &mut Context<NoirPla
                         .child(if enabled {
                             icon_text(MusicIcon::Check, 13.0).text_color(red())
                         } else {
-                            icon_text(MusicIcon::X, 11.0).text_color(c(0x555966))
+                            icon_text(MusicIcon::X, 11.0).text_color(c(0x555559))
                         }),
                 ),
         )
@@ -318,7 +318,7 @@ fn presets_section(current: &str, is_light: bool, cx: &mut Context<NoirPlayerMod
         .py(px(12.0))
         .gap(px(8.0))
         .border_b(px(1.0))
-        .border_color(if is_light { c(0xEDEAEF) } else { c(0x1C1F26) })
+        .border_color(if is_light { c(0xEDEDF0) } else { c(0x17171C) })
         .child(
             h_flex()
                 .items_center()
@@ -361,15 +361,15 @@ fn presets_section(current: &str, is_light: bool, cx: &mut Context<NoirPlayerMod
                         } else if is_light {
                             c(0xF0F1F3)
                         } else {
-                            c(0x181A21)
+                            c(0x131317)
                         })
                         .border(px(1.0))
                         .border_color(if active {
                             red()
                         } else if is_light {
-                            c(0xDCDEE2)
+                            c(0xDEDEE1)
                         } else {
-                            c(0x282C36)
+                            c(0x222227)
                         })
                         .text_color(if active {
                             white(1.0)
@@ -453,14 +453,14 @@ fn bands_section(
                         .gap(px(6.0))
                         .p(px(10.0))
                         .rounded_xl()
-                        .bg(if is_light { c(0xF9FAFB) } else { c(0x16181F) })
+                        .bg(if is_light { c(0xFAFAFA) } else { c(0x111115) })
                         .border(px(1.0))
                         .border_color(if is_active {
                             red().alpha(0.5)
                         } else if is_light {
-                            c(0xE5E7EB)
+                            c(0xE4E4E7)
                         } else {
-                            c(0x232630)
+                            c(0x1D1D22)
                         })
                         .child(
                             div()
@@ -486,7 +486,7 @@ fn bands_section(
                                 } else if is_light {
                                     c(0xF0F1F3)
                                 } else {
-                                    c(0x101116)
+                                    c(0x0C0C10)
                                 })
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
@@ -506,9 +506,9 @@ fn bands_section(
                             h_flex()
                                 .items_center()
                                 .rounded_lg()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x101115) })
+                                .bg(if is_light { c(0xF0F1F3) } else { c(0x0C0C10) })
                                 .border(px(1.0))
-                                .border_color(if is_light { c(0xDCDEE2) } else { c(0x262A34) })
+                                .border_color(if is_light { c(0xDEDEE1) } else { c(0x202025) })
                                 .overflow_hidden()
                                 .child(
                                     div()
@@ -571,9 +571,9 @@ fn level_indicator(gain: f32, enabled: bool, is_light: bool) -> Div {
         .w(px(14.0))
         .h(px(60.0))
         .rounded_md()
-        .bg(if is_light { c(0xEDEAEF) } else { c(0x0E0F14) })
+        .bg(if is_light { c(0xEDEDF0) } else { c(0x0A0A0E) })
         .border(px(1.0))
-        .border_color(if is_light { c(0xDCDEE2) } else { c(0x20232B) })
+        .border_color(if is_light { c(0xDEDEE1) } else { c(0x1A1A1F) })
         .relative()
         .overflow_hidden()
         // Center zero line
@@ -584,7 +584,7 @@ fn level_indicator(gain: f32, enabled: bool, is_light: bool) -> Div {
                 .right_0()
                 .top(px(29.0))
                 .h(px(2.0))
-                .bg(if is_light { c(0x9CA3AF) } else { c(0x353945) }),
+                .bg(if is_light { c(0xA1A1AA) } else { c(0x353539) }),
         )
         // Active bar
         .child(
@@ -598,9 +598,9 @@ fn level_indicator(gain: f32, enabled: bool, is_light: bool) -> Div {
                 .bg(if enabled && clamped.abs() > 0.1 {
                     red()
                 } else if is_light {
-                    c(0x9CA3AF)
+                    c(0xA1A1AA)
                 } else {
-                    c(0x3B3F4C)
+                    c(0x3B3B40)
                 }),
         )
 }
@@ -613,7 +613,7 @@ fn modal_footer(is_light: bool) -> Div {
         .px(px(20.0))
         .py(px(10.0))
         .border_t(px(1.0))
-        .border_color(if is_light { c(0xE4E4E7) } else { c(0x1C1F26) })
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x17171C) })
         .child(
             div()
                 .text_xs()
@@ -633,9 +633,9 @@ fn modal_footer(is_light: bool) -> Div {
                                 .px(px(6.0))
                                 .py(px(1.0))
                                 .rounded_md()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x1E2028) })
+                                .bg(if is_light { c(0xF0F1F3) } else { c(0x18181D) })
                                 .border(px(1.0))
-                                .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D38) })
+                                .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(if is_light { c(0x3F3F46) } else { white(0.65) })
@@ -657,9 +657,9 @@ fn modal_footer(is_light: bool) -> Div {
                                 .px(px(6.0))
                                 .py(px(1.0))
                                 .rounded_md()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x1E2028) })
+                                .bg(if is_light { c(0xF0F1F3) } else { c(0x18181D) })
                                 .border(px(1.0))
-                                .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D38) })
+                                .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                 .text_xs()
                                 .font_weight(FontWeight::BOLD)
                                 .text_color(if is_light { c(0x3F3F46) } else { white(0.65) })

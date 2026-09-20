@@ -69,9 +69,9 @@ pub fn render_update_modal(
                     .w(px(540.0))
                     .max_h(px(520.0))
                     .rounded_2xl()
-                    .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
+                    .bg(if is_light { c(0xFFFFFF) } else { c(0x0D0D11) })
                     .border(px(1.0))
-                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
+                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2A2E) })
                     .shadow(vec![BoxShadow::new(
                         px(0.0),
                         px(24.0),
@@ -101,7 +101,7 @@ pub fn render_update_modal(
                                             .px(px(8.0))
                                             .py(px(3.0))
                                             .rounded_md()
-                                            .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                                            .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
                                             .text_xs()
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(if is_light {
@@ -152,9 +152,9 @@ pub fn render_update_modal(
                                     .w_full()
                                     .max_h(px(170.0))
                                     .rounded_xl()
-                                    .bg(if is_light { c(0xF8F9FA) } else { c(0x16181D) })
+                                    .bg(if is_light { c(0xFAFAFA) } else { c(0x111114) })
                                     .border(px(1.0))
-                                    .border_color(if is_light { c(0xE5E7EB) } else { c(0x222428) })
+                                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
                                     .p(px(12.0))
                                     .overflow_hidden()
                                     .child(smooth_scroll(
@@ -186,7 +186,7 @@ fn modal_header(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
         .px(px(20.0))
         .py(px(14.0))
         .border_b(px(1.0))
-        .border_color(if is_light { c(0xE4E4E7) } else { c(0x222428) })
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
         .child(
             h_flex()
                 .items_center()
@@ -258,7 +258,7 @@ fn progress_section(status: &UpdateStatus, is_light: bool) -> Option<Div> {
                             .w_full()
                             .h(px(6.0))
                             .rounded_full()
-                            .bg(if is_light { c(0xE5E7EB) } else { c(0x24262C) })
+                            .bg(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
                             .overflow_hidden()
                             .child(div().h_full().rounded_full().bg(red()).w(if *total > 0 {
                                 relative(fraction)
@@ -326,9 +326,9 @@ fn secondary_button(id: &'static str, label: &'static str, is_light: bool) -> St
         .px(px(14.0))
         .py(px(7.0))
         .rounded_lg()
-        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
         .border(px(1.0))
-        .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+        .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
         .text_xs()
         .font_weight(FontWeight::BOLD)
         .text_color(if is_light { c(0x52525B) } else { white(0.7) })
@@ -375,7 +375,7 @@ fn modal_footer(
         .px(px(20.0))
         .py(px(14.0))
         .border_t(px(1.0))
-        .border_color(if is_light { c(0xE4E4E7) } else { c(0x222428) })
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
         .child(
             div()
                 .id("update-release-page")
@@ -432,7 +432,7 @@ fn modal_footer(
                 .px(px(16.0))
                 .py(px(7.0))
                 .rounded_lg()
-                .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .text_color(if is_light { c(0x71717A) } else { white(0.5) })

@@ -98,9 +98,9 @@ pub fn render_settings_modal(
                     .w(px(720.0))
                     .h(px(580.0))
                     .rounded_2xl()
-                    .bg(if is_light { c(0xFFFFFF) } else { c(0x111215) })
+                    .bg(if is_light { c(0xFFFFFF) } else { c(0x0D0D11) })
                     .border(px(1.0))
-                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2D35) })
+                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2A2E) })
                     .shadow(vec![BoxShadow::new(
                         px(0.0),
                         px(24.0),
@@ -164,7 +164,7 @@ fn modal_header(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPl
         .px(px(16.0))
         .py(px(12.0))
         .border_b(px(1.0))
-        .border_color(if is_light { c(0xE4E4E7) } else { c(0x222428) })
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
         .child(
             div()
                 .text_color(if is_light { c(0x71717A) } else { white(0.4) })
@@ -224,7 +224,7 @@ fn category_chips(
         .px(px(16.0))
         .py(px(8.0))
         .border_b(px(1.0))
-        .border_color(if is_light { c(0xEDEAEF) } else { c(0x1E2026) })
+        .border_color(if is_light { c(0xEDEDF0) } else { c(0x18181D) })
         .children(CATS.iter().map(|&cat| {
             let active = cat == current;
             div()
@@ -243,7 +243,7 @@ fn category_chips(
                 } else if is_light {
                     c(0xF0F1F3)
                 } else {
-                    c(0x1C1F26)
+                    c(0x17171C)
                 })
                 .text_color(if active {
                     white(1.0)
@@ -498,7 +498,7 @@ fn build_rows(
                                 .px(px(10.0))
                                 .py(px(5.0))
                                 .rounded_lg()
-                                .bg(if is_light_theme { red() } else { c(0x1C1F26) })
+                                .bg(if is_light_theme { red() } else { c(0x17171C) })
                                 .text_color(if is_light_theme {
                                     white(1.0)
                                 } else {
@@ -568,9 +568,9 @@ fn build_rows(
                                 .px(px(12.0))
                                 .py(px(6.0))
                                 .rounded_lg()
-                                .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                                .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
                                 .border(px(1.0))
-                                .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+                                .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                 .flex()
                                 .items_center()
                                 .gap(px(5.0))
@@ -607,7 +607,7 @@ fn build_rows(
                             .px(px(8.0))
                             .py(px(3.0))
                             .rounded_md()
-                            .bg(if is_light { c(0xEDEAEF) } else { c(0x1C1F26) })
+                            .bg(if is_light { c(0xEDEDF0) } else { c(0x17171C) })
                             .text_xs()
                             .text_color(if is_light { c(0x71717A) } else { white(0.5) })
                             .child("System Default"),
@@ -727,9 +727,9 @@ fn build_rows(
                                     .px(px(10.0))
                                     .py(px(6.0))
                                     .rounded_lg()
-                                    .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                                    .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
                                     .border(px(1.0))
-                                    .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+                                    .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                                     .text_xs()
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(if is_light { c(0x71717A) } else { white(0.7) })
@@ -818,9 +818,9 @@ fn build_rows(
                         .px(px(12.0))
                         .py(px(6.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
                         .border(px(1.0))
-                        .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+                        .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                         .flex()
                         .items_center()
                         .gap(px(6.0))
@@ -952,7 +952,7 @@ fn build_rows(
                         .px(px(12.0))
                         .py(px(6.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
                         .text_xs()
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(if is_light { c(0x71717A) } else { white(0.5) })
@@ -962,9 +962,9 @@ fn build_rows(
                         .px(px(12.0))
                         .py(px(6.0))
                         .rounded_lg()
-                        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+                        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
                         .border(px(1.0))
-                        .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+                        .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
                         .flex()
                         .items_center()
                         .gap(px(5.0))
@@ -999,7 +999,7 @@ fn build_rows(
                         .px(px(8.0))
                         .py(px(3.0))
                         .rounded_md()
-                        .bg(if is_light { c(0xEDEAEF) } else { c(0x1C1F26) })
+                        .bg(if is_light { c(0xEDEDF0) } else { c(0x17171C) })
                         .text_xs()
                         .font_weight(FontWeight::BOLD)
                         .text_color(red())
@@ -1053,20 +1053,20 @@ fn row_base(
             if is_light {
                 c(0xFDE8E8)
             } else {
-                c(0x18191F)
+                c(0x131316)
             }
         } else if is_light {
-            c(0xF9FAFB)
+            c(0xFAFAFA)
         } else {
-            c(0x141519)
+            c(0x121216)
         })
         .border(px(1.5))
         .border_color(if active {
             red().alpha(0.75)
         } else if is_light {
-            c(0xE5E7EB)
+            c(0xE4E4E7)
         } else {
-            c(0x222428)
+            c(0x1E1E22)
         })
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1111,7 +1111,7 @@ where
         .w(px(44.0))
         .h(px(24.0))
         .rounded_full()
-        .bg(if on { red() } else { c(0x2E313A) })
+        .bg(if on { red() } else { c(0x2E2E33) })
         .p(px(2.0))
         .flex()
         .items_center()
@@ -1135,7 +1135,7 @@ where
                 .child(if on {
                     icon_text(MusicIcon::Check, 12.0).text_color(red())
                 } else {
-                    icon_text(MusicIcon::X, 10.0).text_color(c(0x555966))
+                    icon_text(MusicIcon::X, 10.0).text_color(c(0x555559))
                 }),
         )
 }
@@ -1155,9 +1155,9 @@ where
     h_flex()
         .items_center()
         .rounded_lg()
-        .bg(if is_light { c(0xF0F1F3) } else { c(0x1C1F26) })
+        .bg(if is_light { c(0xF0F1F3) } else { c(0x17171C) })
         .border(px(1.0))
-        .border_color(if is_light { c(0xDCDEE2) } else { c(0x2A2D35) })
+        .border_color(if is_light { c(0xDEDEE1) } else { c(0x2A2A2E) })
         .overflow_hidden()
         .child(
             div()
@@ -1211,9 +1211,9 @@ fn key_chip(key: &str, is_light: bool) -> Div {
         .px(px(7.0))
         .py(px(2.0))
         .rounded_md()
-        .bg(if is_light { c(0xF0F1F3) } else { c(0x1E2026) })
+        .bg(if is_light { c(0xF0F1F3) } else { c(0x18181D) })
         .border(px(1.0))
-        .border_color(if is_light { c(0xD4D4D8) } else { c(0x2A2D35) })
+        .border_color(if is_light { c(0xD4D4D8) } else { c(0x2A2A2E) })
         .text_xs()
         .font_weight(FontWeight::BOLD)
         .text_color(if is_light { c(0x27272A) } else { white(0.7) })
@@ -1228,7 +1228,7 @@ fn keyboard_hints(is_light: bool) -> Div {
         .gap(px(14.0))
         .py(px(8.0))
         .border_t(px(1.0))
-        .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E2026) })
+        .border_color(if is_light { c(0xE4E4E7) } else { c(0x18181D) })
         .child(hint_badge("Ctrl + ,", "Settings", is_light))
         .child(hint_badge("Ctrl + E", "Equalizer", is_light))
         .child(hint_badge("Escape", "to close", is_light))
@@ -1243,9 +1243,9 @@ fn hint_badge(key: &str, desc: &str, is_light: bool) -> Div {
                 .px(px(6.0))
                 .py(px(1.5))
                 .rounded_md()
-                .bg(if is_light { c(0xF0F1F3) } else { c(0x1E2026) })
+                .bg(if is_light { c(0xF0F1F3) } else { c(0x18181D) })
                 .border(px(1.0))
-                .border_color(if is_light { c(0xD4D4D8) } else { c(0x2A2D35) })
+                .border_color(if is_light { c(0xD4D4D8) } else { c(0x2A2A2E) })
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
                 .text_color(if is_light { c(0x27272A) } else { white(0.65) })

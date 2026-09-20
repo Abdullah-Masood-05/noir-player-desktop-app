@@ -6,31 +6,48 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Build targets](https://img.shields.io/badge/build_targets-Windows%20%7C%20macOS%20%7C%20Linux-555)](#packaging-and-releases)
 
-This is the desktop version of [NoirPlayer for Android](https://github.com/Abdullah-Masood-05/NoirPlayer), rebuilt in Rust with GPUI Kit. It features both a rich red-and-dark theme with a crimson glowing top wash and an adaptive red-and-white light theme inspired by the mobile app, alongside multi-folder library scanning, a 5-band graphic equalizer, and Discover services.
+This is the desktop version of [NoirPlayer for Android](https://github.com/Abdullah-Masood-05/NoirPlayer), rebuilt in Rust with GPUI Kit. The window is laid out for a desktop: a navigation rail on the left, the song list in the middle, a queue you can dock on the right, and a transport bar along the bottom. It keeps the red-on-black look of the mobile app, has a light theme for daylight, and adds multi-folder library scanning, a 5-band graphic equalizer and Discover.
 
 Version 1.2.1. See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
 
 ## Playback and library
 
-The library scans the system Music folder by default as well as any custom folders configured in **Settings** (`Ctrl+,`). Scanning runs recursively on startup and when rescanned, reading title, artist, album, duration, and embedded artwork. It groups tracks by album and artist, deduplicates files across folders, and searches across title, artist, and album. It does not follow symbolic links or Windows reparse points. Multiple scan folders can be added, removed, or rescanned at any time via the Settings modal.
+The library scans the system Music folder by default as well as any custom folders configured in **Settings** (`Ctrl+,`). Scanning runs recursively on startup and when rescanned, reading title, artist, album, release year, duration, and embedded artwork, plus each file's modified time for the recently added ordering. It groups tracks by album and artist, deduplicates files across folders, and searches across title, artist, and album. It does not follow symbolic links or Windows reparse points. Multiple scan folders can be added, removed, or rescanned at any time via the Settings modal.
 
 The scanner accepts `.mp3`, `.flac`, `.wav`, `.ogg`, `.oga`, `.m4a`, `.mp4`, `.aac`, `.aif` and `.aiff`. Extensions are not a guarantee of codec support. Playback uses Rodio's enabled decoders, including the additional ALAC and AIFF features. Files with unreadable metadata can fall back to a filename title if audio decoding succeeds.
 
-Controls include play/pause, previous/next, seeking with configurable intervals (5s, 10s, 15s, 30s), volume, shuffle, repeat-all, and a **5-band graphic equalizer**. Playlists and favourites store local file paths, not copies of the audio. Moving a file breaks its saved reference; rescanning does not relocate it automatically. Playback position, queue, volume and shuffle state are not saved across restarts.
+Controls include play/pause, previous/next, seeking with configurable intervals (5s, 10s, 15s, 30s) or by clicking anywhere on the scrubber, volume, shuffle, repeat-all, and a **5-band graphic equalizer**. Songs can be played next, added to the queue or dropped from it.
+
+Playlists, favourites and play history store local file paths, not copies of the audio. Moving a file breaks its saved reference; rescanning does not relocate it automatically. Volume, favourites, playlists and the list of recently played songs survive a restart. The queue, the playing song and its position, and the shuffle state do not.
 
 ### Equalizer and audio DSP
 
 - **Bands**: 60 Hz (Sub-Bass), 230 Hz (Bass), 910 Hz (Midrange), 3.6 kHz (Presence), and 14 kHz (Brilliance) with continuous ±12 dB gain adjustment.
-- **Presets**: Flat, Bass Boost, Treble Boost, Vocal Boost, Rock, and Electronic.
+- **Presets**: Flat, Bass Boost, Treble Boost, Vocal, Rock and Pop.
 - **Access**: Press `Ctrl+E` (`Cmd+E` on macOS) or click the Equalizer button in the player bar.
 
-## Themes and interface
+## Interface
 
-Noir Player provides two handcrafted themes:
-- **Dark Theme**: Deep black surfaces (`#0A0A0A` / `#161616`) with an atmospheric red aura top wash, crimson borders, and glowing red play accents.
-- **Light Theme**: Crisp white cards (`#FFFFFF`), subtle silver borders (`#E5E5E5`), clean neutral backgrounds (`#FAFAFA`), `#1A1A1A` charcoal typography, and vibrant red accents (`#D32F2F`), matching the mobile NoirPlayer design.
+The navigation rail on the left holds Library, Favorites, Albums, Artists, Folders, Playlists, Discover and Recently Played, with Settings pinned at the bottom. Everything else is the current page, the queue rail and the player bar.
 
-Switch themes anytime via the theme toggle in the window header or inside **Settings** (`Ctrl+,`). Settings also allows managing library scan folders, custom download destinations, seeking intervals, and automatic or manual software update checks. Modals feature smooth entrance animations and backdrop scroll containment preventing background library items from scrolling while a dialog is active.
+### Song lists
+
+Songs are sorted A to Z by default. Each letter gets a small heading above its songs with the number of songs under it, and titles that start with a digit or a symbol are filed under a leading `#` group, so `05. Aashiyan` comes before `Arcade`. The sort picker in the header also offers Z to A, artist, album, duration and recently added, which reads the modified time of each file. Letter headings appear in the two alphabetical orders only. The media picker beside it narrows the list to a single scan folder.
+
+A row plays when clicked and reveals a Play button and a heart on hover. Its menu covers play next, add to queue, favourites, adding to a playlist and removing the song from an open playlist. The library home opens with a greeting card carrying the song, album and artist counts, then a shelf of recently played songs, then the list itself. "See all" beside either heading opens that list on a page of its own.
+
+### Queue and playback
+
+The queue rail on the right shows the playing song followed by everything still to come. Songs can be dropped from it individually or cleared in one go, and the rail collapses to a slim strip you can click to bring it back. The queue button in the player bar does the same.
+
+The player bar carries the artwork, transport controls, the scrubber, volume, and toggles for lyrics and the equalizer. Clicking the artwork opens the now playing page, which fills the window with the cover art, the transport, an Up Next card and a lyrics panel. Lyrics come from the file's own lyrics tag; a file without one says so rather than fetching anything.
+
+### Themes
+
+- **Dark**: near-black surfaces (`#0A0A0C` base, `#0C0C0F` rails, `#151519` cards) with a red wash behind the rails and red play accents.
+- **Light**: white cards (`#FFFFFF`), silver borders (`#E4E4E7`), `#FAFAFA` backgrounds, `#1A1A1A` charcoal type and `#E53935` red accents, matching the mobile NoirPlayer design.
+
+Switch themes inside **Settings** (`Ctrl+,`), which also manages library scan folders, custom download destinations, seeking intervals, and automatic or manual software update checks. Modals animate in and contain their own scrolling, so the library behind a dialog stays put.
 
 ### Keyboard shortcuts
 
@@ -79,7 +96,7 @@ Missing keys, rejected requests, exhausted quota and malformed responses are sho
 
 | Data | Windows | macOS | Linux |
 | --- | --- | --- | --- |
-| Playlists, favourites & settings | `%LOCALAPPDATA%\noir-player\playlists.json` | `~/Library/Application Support/noir-player/playlists.json` | `$XDG_DATA_HOME/noir-player/playlists.json`, default `~/.local/share/noir-player/playlists.json` |
+| Playlists, favourites, play history & settings | `%LOCALAPPDATA%\noir-player\playlists.json` | `~/Library/Application Support/noir-player/playlists.json` | `$XDG_DATA_HOME/noir-player/playlists.json`, default `~/.local/share/noir-player/playlists.json` |
 | Prepared Discover audio | `%LOCALAPPDATA%\noir-player\discover` | `~/Library/Caches/noir-player/discover` | `$XDG_CACHE_HOME/noir-player/discover`, default `~/.cache/noir-player/discover` |
 | Downloads and scanned library | System Music folder & user-configured scan paths | System Music folder & user-configured scan paths | System Music folder & user-configured scan paths |
 
@@ -140,7 +157,7 @@ Tests cover local parsing, scanning, storage and audio-related helpers. CI does 
 
 ### Dependency sources
 
-The manifest uses `gpui-kit 0.6`, `rodio 0.21`, `lofty 0.22`, `ureq 3`, `serde`, `serde_json`, `dotenvy`, `urlencoding`, `walkdir`, `dirs`, `smol` and `anyhow`. Build dependencies are `winresource` and `image`; Linux also uses `image` for the window icon. The inspected lockfile resolves GPUI Kit 0.6.1, GPUI platform snapshots 0.3.5, Rodio 0.21.1 and Lofty 0.22.4.
+The manifest uses `gpui-kit 0.6`, `rodio 0.21`, `lofty 0.22`, `ureq 3`, `serde`, `serde_json`, `dotenvy`, `urlencoding`, `walkdir`, `dirs`, `smol`, `chrono` and `anyhow`. Build dependencies are `winresource` and `image`; Linux also uses `image` for the window icon. The inspected lockfile resolves GPUI Kit 0.6.1, GPUI platform snapshots 0.3.5, Rodio 0.21.1 and Lofty 0.22.4.
 
 Build and packaging decisions are based on:
 

@@ -535,6 +535,17 @@ fn spawn_installer(installer: &Path) -> Result<()> {
 /// and asks for elevation on its own. The exit code is logged either way, so
 /// a failed install leaves a trace instead of silently reopening the old
 /// build.
+/// Whether a directory is a cargo build output such as `target/debug` or
+/// `target/x86_64-pc-windows-msvc/release`.
+#[cfg(target_os = "windows")]
+fn is_cargo_build_output(dir: &Path) -> bool {
+    let profile = dir.file_name().and_then(|name| name.to_str());
+    matches!(profile, Some("debug") | Some("release"))
+        && dir
+            .ancestors()
+            .any(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("target"))
+}
+
 #[cfg(target_os = "windows")]
 fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) -> String {
     let is_msi = installer
@@ -547,8 +558,11 @@ fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) ->
         )
     } else {
         // `/D` sets the target directory, pinning the update to the directory
-        // the app runs from. NSIS requires it last and unquoted.
-        match exe.parent() {
+        // the app runs from. NSIS requires it last and unquoted. A cargo
+        // build output is not an install, and pinning there would drop an
+        // installed copy and an uninstaller into the build directory, so the
+        // installer picks its own location in that case.
+        match exe.parent().filter(|dir| !is_cargo_build_output(dir)) {
             Some(dir) => format!(
                 r#"start "" /wait "{}" /S /D={}"#,
                 installer.display(),
@@ -865,6 +879,36 @@ mod tests {
         assert!(msi.contains(
             r#"start "" /wait %SystemRoot%\System32\msiexec.exe /i "C:\cache\update.msi" /passive /norestart"#
         ));
+    }
+
+    /// Running from `cargo build` output is not an install, so the helper
+    /// must not pin the installer there: doing so drops an installed copy and
+    /// an uninstaller into the build directory.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_build_directory_is_never_used_as_the_install_target() {
+        let log = Path::new(r"C:\cache\update.install.log");
+        let setup = Path::new(r"C:\cache\setup.exe");
+
+        for build in [
+            r"C:\src\noir\target\debug\noir_player.exe",
+            r"C:\src\noir\target\release\noir_player.exe",
+            r"C:\src\noir\target\x86_64-pc-windows-msvc\release\noir_player.exe",
+        ] {
+            let script = windows_install_script(7, setup, Path::new(build), log);
+            assert!(
+                !script.contains("/D="),
+                "pinned the installer into the build directory: {build}"
+            );
+        }
+
+        let installed = windows_install_script(
+            7,
+            setup,
+            Path::new(r"C:\Users\me\AppData\Local\Programs\Noir Player\noir_player.exe"),
+            log,
+        );
+        assert!(installed.contains(r"/D=C:\Users\me\AppData\Local\Programs\Noir Player"));
     }
 
     /// A per machine install has to be upgraded by Windows Installer. The

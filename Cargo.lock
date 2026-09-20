@@ -5813,6 +5813,7 @@ name = "noir_player"
 version = "1.2.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "dirs 6.0.0",
  "dotenvy",
  "gpui-kit",

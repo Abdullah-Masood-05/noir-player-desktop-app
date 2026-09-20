@@ -11,6 +11,7 @@ homepage = "https://github.com/Abdullah-Masood-05/noir-player-desktop-app"
 
 [dependencies]
 gpui-kit = "0.6"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 anyhow = "1"
 ureq = { version = "3", features = ["json"] }
 serde = { version = "1", features = ["derive"] }

@@ -37,7 +37,12 @@ platform, verifies it, and installs it on restart.
   installer never started and the app simply reopened at its old version.
 - The install helper runs with a hidden console instead of detached, because
   `start` needs a console to hand the installer to.
-- Running from a cargo build directory no longer pins the installer there.
+- A build running from the cargo target directory does not install at all,
+  and says so. Installing there registered the build directory as the app's
+  install location, which a later MSI then inherited through the registry key
+  the NSIS installer writes, putting a second install in the build folder.
+- Windows Installer is told where the app lives instead of reading that
+  registry key, so an upgrade stays in the directory the app runs from.
 - On macOS the replacement bundle is staged and swapped in only after the copy
   succeeds, so a failed update can no longer leave no app at all.
 - The greeting card uses a smaller corner radius, and the media and sort

@@ -55,6 +55,20 @@ impl Collection {
     }
 }
 
+/// A running update download. Dropping it cancels the transfer.
+struct UpdateJob {
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    received: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    total: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Drop for UpdateJob {
+    fn drop(&mut self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 struct DiscoverAudioJob {
     request: u64,
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -115,6 +129,7 @@ pub struct NoirPlayerModel {
     pub update_status: crate::update::UpdateStatus,
     pub update_dialog_open: bool,
     pub latest_release: Option<crate::update::ReleaseInfo>,
+    update_job: Option<UpdateJob>,
     _subscriptions: Vec<Subscription>,
     dialog_subscription: Option<Subscription>,
 }
@@ -210,6 +225,7 @@ impl NoirPlayerModel {
             update_status: crate::update::UpdateStatus::Idle,
             update_dialog_open: false,
             latest_release: None,
+            update_job: None,
             _subscriptions: subscriptions,
             dialog_subscription: None,
         };
@@ -295,6 +311,153 @@ impl NoirPlayerModel {
             });
         })
         .detach();
+    }
+
+    /// Downloads the installer for the available release and verifies it
+    /// against the checksum published with the release.
+    pub fn start_update_download(&mut self, cx: &mut Context<Self>) {
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::sync::Arc;
+
+        if self.update_job.is_some() {
+            return;
+        }
+        let Some(release) = self.latest_release.clone() else {
+            return;
+        };
+        let Some(asset) = release.platform_asset().cloned() else {
+            self.update_status = crate::update::UpdateStatus::Error(format!(
+                "Release {} has no installer for this platform.",
+                release.tag_name
+            ));
+            cx.notify();
+            return;
+        };
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        let received = Arc::new(AtomicU64::new(0));
+        let total = Arc::new(AtomicU64::new(asset.size));
+        self.update_job = Some(UpdateJob {
+            cancel: cancel.clone(),
+            received: received.clone(),
+            total: total.clone(),
+        });
+        self.update_status = crate::update::UpdateStatus::Downloading {
+            received: 0,
+            total: asset.size,
+        };
+        self.update_dialog_open = true;
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let asset_name = asset.name.clone();
+            let download = cx
+                .background_executor()
+                .spawn(async move {
+                    let dir = crate::update::update_dir()?;
+                    crate::update::download_asset(&asset, &dir, &cancel, &|got, size| {
+                        received.store(got, Ordering::Relaxed);
+                        total.store(size, Ordering::Relaxed);
+                    })
+                })
+                .await;
+
+            let path = match download {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.finish_update_job(Err(format!("{error:#}")), cx);
+                    });
+                    return;
+                }
+            };
+
+            let _ = this.update(cx, |this, cx| {
+                this.update_status = crate::update::UpdateStatus::Verifying;
+                cx.notify();
+            });
+
+            let verify_path = path.clone();
+            let verified = cx
+                .background_executor()
+                .spawn(async move {
+                    let expected = crate::update::expected_checksum(
+                        &release,
+                        &asset_name,
+                        Duration::from_secs(30),
+                    )?;
+                    let Some(expected) = expected else {
+                        anyhow::bail!(
+                            "This release publishes no checksum, so the download cannot be verified."
+                        );
+                    };
+                    let actual = crate::update::sha256_file(&verify_path)?;
+                    if !actual.eq_ignore_ascii_case(&expected) {
+                        let _ = std::fs::remove_file(&verify_path);
+                        anyhow::bail!("The download did not match its checksum and was deleted.");
+                    }
+                    Ok(())
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.finish_update_job(
+                    verified.map(|()| path).map_err(|error| format!("{error:#}")),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn finish_update_job(&mut self, result: Result<PathBuf, String>, cx: &mut Context<Self>) {
+        self.update_job = None;
+        self.update_status = match result {
+            Ok(path) => crate::update::UpdateStatus::Ready(path),
+            Err(error) => crate::update::UpdateStatus::Error(error),
+        };
+        cx.notify();
+    }
+
+    pub fn cancel_update_download(&mut self, cx: &mut Context<Self>) {
+        if self.update_job.take().is_none() {
+            return;
+        }
+        self.update_status = match self.latest_release.clone() {
+            Some(release) => crate::update::UpdateStatus::Available(release),
+            None => crate::update::UpdateStatus::Idle,
+        };
+        cx.notify();
+    }
+
+    /// Hands the verified installer to the platform and quits, so it can
+    /// replace files this process is holding open.
+    pub fn install_update(&mut self, cx: &mut Context<Self>) {
+        let crate::update::UpdateStatus::Ready(path) = self.update_status.clone() else {
+            return;
+        };
+        self.update_status = crate::update::UpdateStatus::Installing;
+        cx.notify();
+
+        match crate::update::launch_installer(&path) {
+            Ok(()) if crate::update::installs_in_place() => {
+                self.is_playing = false;
+                if let Some(player) = self.player.as_mut() {
+                    player.stop();
+                }
+                cx.quit();
+            }
+            Ok(()) => {
+                // The system package installer took over; stay running.
+                self.update_status = crate::update::UpdateStatus::Ready(path);
+                self.update_dialog_open = false;
+                cx.notify();
+            }
+            Err(error) => {
+                self.update_status = crate::update::UpdateStatus::Error(format!("{error:#}"));
+                cx.notify();
+            }
+        }
     }
 
     pub fn cancel_discover_audio(&mut self, cx: &mut Context<Self>) {
@@ -1004,6 +1167,18 @@ impl NoirPlayerModel {
                     },
                     progress
                 ));
+            }
+        }
+        if let Some(job) = self.update_job.as_ref() {
+            if matches!(
+                self.update_status,
+                crate::update::UpdateStatus::Downloading { .. }
+            ) {
+                use std::sync::atomic::Ordering;
+                self.update_status = crate::update::UpdateStatus::Downloading {
+                    received: job.received.load(Ordering::Relaxed),
+                    total: job.total.load(Ordering::Relaxed),
+                };
             }
         }
         if self.is_playing && self.player.as_ref().is_some_and(MediaPlayer::is_finished) {

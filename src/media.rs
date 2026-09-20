@@ -9,7 +9,7 @@ use lofty::config::{ParseOptions, ParsingMode};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::PictureType;
 use lofty::probe::Probe;
-use lofty::tag::Accessor;
+use lofty::tag::{Accessor, ItemKey};
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 use walkdir::WalkDir;
 
@@ -21,6 +21,9 @@ pub struct Track {
     pub album: String,
     pub duration: Duration,
     pub artwork: Option<Arc<[u8]>>,
+    pub year: Option<u32>,
+    /// Last modified time of the file, used for the "Recently added" ordering.
+    pub added: Option<std::time::SystemTime>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -433,6 +436,8 @@ fn read_track(path: &Path) -> Result<Track> {
                 album: "Unknown Album".to_owned(),
                 duration,
                 artwork: None,
+                year: None,
+                added: file_added(path),
             });
         }
     };
@@ -469,6 +474,8 @@ fn read_track(path: &Path) -> Result<Track> {
         })
         .map(|picture| Arc::from(picture.data()));
 
+    let year = tag.and_then(|tag| tag.year()).filter(|year| *year > 0);
+
     Ok(Track {
         path: path.to_path_buf(),
         title,
@@ -476,7 +483,31 @@ fn read_track(path: &Path) -> Result<Track> {
         album,
         duration,
         artwork,
+        year,
+        added: file_added(path),
     })
+}
+
+/// Modified time of a library file, used to order "Recently added".
+fn file_added(path: &Path) -> Option<std::time::SystemTime> {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
+/// Reads lyrics embedded in a file's tags. Returns `None` when the file has no
+/// lyrics tag, or cannot be read.
+pub fn read_lyrics(path: &Path) -> Option<String> {
+    let tagged = Probe::open(path)
+        .ok()?
+        .options(ParseOptions::new().parsing_mode(ParsingMode::Relaxed))
+        .read()
+        .ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    tag.get_string(&ItemKey::Lyrics)
+        .map(str::trim)
+        .filter(|lyrics| !lyrics.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn filename_title(path: &Path) -> String {

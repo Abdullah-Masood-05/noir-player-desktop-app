@@ -13,6 +13,9 @@ pub struct Store {
     pub playlists: Vec<SavedPlaylist>,
     #[serde(default)]
     pub favourites: Vec<PathBuf>,
+    /// Most recently played files, newest first.
+    #[serde(default)]
+    pub recently_played: Vec<PathBuf>,
     #[serde(default = "default_seek_interval")]
     pub seek_interval_seconds: u32,
     #[serde(default)]
@@ -70,6 +73,7 @@ impl Default for Store {
         Self {
             playlists: Vec::new(),
             favourites: Vec::new(),
+            recently_played: Vec::new(),
             seek_interval_seconds: 10,
             equalizer_enabled: false,
             equalizer_gains: [0.0; 5],
@@ -155,6 +159,13 @@ impl Store {
         result
     }
 
+    /// Records `path` as the newest play, keeping the list unique and bounded.
+    pub fn remember_played(&mut self, path: &Path) {
+        self.recently_played.retain(|entry| entry != path);
+        self.recently_played.insert(0, path.to_path_buf());
+        self.recently_played.truncate(RECENTLY_PLAYED_LIMIT);
+    }
+
     pub fn create_playlist(&mut self, name: &str) -> Result<String> {
         let name = validate_name(
             name,
@@ -167,6 +178,9 @@ impl Store {
         Ok(name)
     }
 }
+
+/// How many plays the library remembers for the "Recently played" shelf.
+pub const RECENTLY_PLAYED_LIMIT: usize = 60;
 
 fn deduplicate(paths: &mut Vec<PathBuf>) {
     let mut seen = std::collections::HashSet::new();
@@ -332,6 +346,8 @@ mod tests {
             album: String::new(),
             duration: Default::default(),
             artwork: None,
+            year: None,
+            added: None,
         };
         let paths = vec![
             PathBuf::from("b.mp3"),

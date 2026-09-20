@@ -24,7 +24,7 @@ pub enum UpdateStatus {
 }
 
 pub fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
-    let v = v.trim().trim_start_matches(|c| c == 'v' || c == 'V');
+    let v = v.trim().trim_start_matches(['v', 'V']);
     let core = v.split(['-', '+']).next()?;
     let mut parts = core.split('.');
     let major = parts.next()?.parse().ok()?;
@@ -84,9 +84,7 @@ pub fn check_latest_release(timeout: Duration) -> Result<Option<ReleaseInfo>> {
         .ok_or_else(|| anyhow!("Missing tag_name in release response"))?
         .to_string();
 
-    let version = tag_name
-        .trim_start_matches(|c| c == 'v' || c == 'V')
-        .to_string();
+    let version = tag_name.trim_start_matches(['v', 'V']).to_string();
 
     let name = json
         .get("name")

@@ -198,9 +198,7 @@ jobs:
           if iconset.exists():
               shutil.rmtree(iconset)
           iconset.mkdir()
-          # A square, rounded-corner rendering of the logo: macOS shows the
-          # icon exactly as given, so the rounding has to be in the artwork.
-          source = pathlib.Path('packaging/icons/app-icon.png').resolve()
+          source = pathlib.Path('Noir_Player_Logo.png').resolve()
           for size in (16, 32, 128, 256, 512):
               for scale in (1, 2):
                   pixels = size * scale

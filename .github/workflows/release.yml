@@ -163,6 +163,7 @@ jobs:
           import os
           import pathlib
           import plistlib
+          import shutil
           import subprocess
           bundle_dir = pathlib.Path('target') / os.environ['TARGET'] / 'release/bundle/osx'
           apps = list(bundle_dir.glob('*.app'))
@@ -183,9 +184,36 @@ jobs:
               f"Version mismatch: plist={info['CFBundleShortVersionString']} env={os.environ['VERSION']}"
           executable = app / 'Contents/MacOS' / info['CFBundleExecutable']
           assert subprocess.check_output(['lipo', '-archs', str(executable)], text=True).strip() == 'arm64'
+          # cargo-bundle only packs icons that already match a size icns
+          # accepts, and the logo is 700x688, so it produced no icns at all and
+          # left CFBundleIconFile unset. Build the icon set with the platform's
+          # own tools instead. iconutil accepts these sizes and no others.
+          iconset = pathlib.Path(os.environ['RUNNER_TEMP']) / 'noir.iconset'
+          if iconset.exists():
+              shutil.rmtree(iconset)
+          iconset.mkdir()
+          source = pathlib.Path('Noir_Player_Logo.png').resolve()
+          for size in (16, 32, 128, 256, 512):
+              for scale in (1, 2):
+                  pixels = size * scale
+                  suffix = '' if scale == 1 else '@2x'
+                  subprocess.run([
+                      'sips', '-z', str(pixels), str(pixels), str(source),
+                      '--out', str(iconset / f'icon_{size}x{size}{suffix}.png'),
+                  ], check=True, stdout=subprocess.DEVNULL)
+          icns = pathlib.Path(os.environ['RUNNER_TEMP']) / 'noir.icns'
+          subprocess.run(['iconutil', '-c', 'icns', str(iconset), '-o', str(icns)], check=True)
+          resources = app / 'Contents/Resources'
+          resources.mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(icns, resources / 'noir_player.icns')
+          info['CFBundleIconFile'] = 'noir_player.icns'
+
+          # Unconditional: a bundle with no icon used to pass this step.
           icon_file = info.get('CFBundleIconFile', '')
-          if icon_file:
-              assert (app / 'Contents/Resources' / icon_file).is_file(), f'Missing icon: {icon_file}'
+          assert icon_file, 'The bundle declares no CFBundleIconFile'
+          packed = app / 'Contents/Resources' / icon_file
+          assert packed.is_file() and packed.stat().st_size > 0, f'Missing icon: {icon_file}'
+          print(f'Packed {icon_file} ({packed.stat().st_size} bytes)')
           info['LSMinimumSystemVersion'] = '14.0'
           plist_path.write_bytes(plistlib.dumps(info))
           subprocess.run(['plutil', '-lint', str(plist_path)], check=True)

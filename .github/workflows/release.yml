@@ -308,7 +308,15 @@ jobs:
               'License:        MIT',
               'URL:            https://github.com/Abdullah-Masood-05/noir-player-desktop-app',
               'AutoReqProv:    no',
-              'Requires:       alsa-lib, libxkbcommon, libxkbcommon-x11, vulkan-loader, wayland',
+              # Required by soname, not by package name: these libraries are
+              # opened at run time, and every RPM distribution advertises the
+              # soname while the package names differ. Fedora has no package
+              # called "wayland", so requiring that name never resolved.
+              'Requires:       libasound.so.2()(64bit)',
+              'Requires:       libwayland-client.so.0()(64bit)',
+              'Requires:       libxkbcommon.so.0()(64bit)',
+              'Requires:       libxkbcommon-x11.so.0()(64bit)',
+              'Requires:       libvulkan.so.1()(64bit)',
               '%description',
               'Noir Player music player.',
               '%prep',

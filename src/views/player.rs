@@ -28,7 +28,7 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
     };
     let artwork = model.now_playing().and_then(|track| track.artwork.clone());
     let has_track = model.current.is_some();
-    let intensity = if is_playing { 1.0 } else { 0.4 };
+    let meter = model.audio_meter();
 
     v_flex()
         .size_full()
@@ -88,18 +88,25 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
                                                 .justify_end()
                                                 .overflow_hidden()
                                                 .child(waveform(
-                                                    34, 3.0, 4.0, 150.0, progress, intensity,
+                                                    "player-wave-left",
+                                                    34,
+                                                    3.0,
+                                                    4.0,
+                                                    150.0,
+                                                    is_playing,
+                                                    meter.clone(),
                                                 )),
                                         )
                                         .child(artwork_large(artwork, is_playing))
                                         .child(div().flex_1().min_w_0().overflow_hidden().child(
                                             waveform(
+                                                "player-wave-right",
                                                 34,
                                                 3.0,
                                                 4.0,
                                                 150.0,
-                                                progress + 0.5,
-                                                intensity,
+                                                is_playing,
+                                                meter.clone(),
                                             ),
                                         )),
                                 )

@@ -631,6 +631,27 @@ impl BiquadChannel {
     }
 }
 
+/// Peak level of the audio leaving the player, written by the audio thread
+/// and read by the interface. Cloning shares the same reading.
+#[derive(Clone, Debug, Default)]
+pub struct LevelMeter(Arc<std::sync::atomic::AtomicU32>);
+
+impl LevelMeter {
+    /// The current level, roughly 0 for silence and 1 for a full scale peak.
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.0.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    fn store(&self, value: f32) {
+        self.0
+            .store(value.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Samples per meter update: about 11 ms at 48 kHz stereo, fast enough to
+/// follow a beat without writing on every sample.
+const METER_WINDOW: u32 = 1024;
+
 pub struct EqualizerSource<I> {
     input: I,
     channels: u16,
@@ -640,13 +661,16 @@ pub struct EqualizerSource<I> {
     coeffs: [BiquadCoeffs; 5],
     cached_gains: [f32; 5],
     state: Arc<std::sync::RwLock<EqualizerState>>,
+    meter: LevelMeter,
+    peak: f32,
+    metered: u32,
 }
 
 impl<I> EqualizerSource<I>
 where
     I: Source<Item = f32>,
 {
-    pub fn new(input: I, state: Arc<std::sync::RwLock<EqualizerState>>) -> Self {
+    pub fn new(input: I, state: Arc<std::sync::RwLock<EqualizerState>>, meter: LevelMeter) -> Self {
         let channels = input.channels().max(1);
         let sample_rate = input.sample_rate().max(1);
         let mut filters = Vec::with_capacity(5);
@@ -667,6 +691,9 @@ where
             filters,
             coeffs,
             cached_gains: initial_gains,
+            meter,
+            peak: 0.0,
+            metered: 0,
             state,
         }
     }
@@ -708,6 +735,28 @@ where
     }
 }
 
+impl<I> EqualizerSource<I> {
+    /// Tracks the peak over a short window. The level jumps to a new peak at
+    /// once and falls back gradually, so the meter follows transients without
+    /// flickering between windows.
+    #[inline]
+    fn meter_sample(&mut self, sample: f32) {
+        self.peak = self.peak.max(sample.abs());
+        self.metered += 1;
+        if self.metered >= METER_WINDOW {
+            let previous = self.meter.level();
+            let level = if self.peak > previous {
+                self.peak
+            } else {
+                previous * 0.80 + self.peak * 0.20
+            };
+            self.meter.store(level.clamp(0.0, 1.0));
+            self.peak = 0.0;
+            self.metered = 0;
+        }
+    }
+}
+
 impl<I> Iterator for EqualizerSource<I>
 where
     I: Source<Item = f32>,
@@ -717,6 +766,7 @@ where
     #[inline]
     fn next(&mut self) -> Option<f32> {
         let sample = self.input.next()?;
+        self.meter_sample(sample);
 
         if self.current_channel == 0 {
             if let Ok(state) = self.state.read() {
@@ -758,6 +808,7 @@ pub struct MediaPlayer {
     duration: Option<Duration>,
     loaded: bool,
     pub eq_state: Arc<std::sync::RwLock<EqualizerState>>,
+    meter: LevelMeter,
 }
 
 impl MediaPlayer {
@@ -773,6 +824,7 @@ impl MediaPlayer {
             duration: None,
             loaded: false,
             eq_state,
+            meter: LevelMeter::default(),
         })
     }
 
@@ -790,13 +842,18 @@ impl MediaPlayer {
         let sink = Sink::connect_new(self.stream.mixer());
         sink.pause();
         sink.set_volume(self.sink.volume());
-        let eq_source = EqualizerSource::new(decoder, self.eq_state.clone());
+        let eq_source = EqualizerSource::new(decoder, self.eq_state.clone(), self.meter.clone());
         sink.append(eq_source);
         self.sink.stop();
         self.sink = sink;
         self.duration = duration;
         self.loaded = true;
         Ok(())
+    }
+
+    /// Shared peak meter for the audio being played.
+    pub fn meter(&self) -> LevelMeter {
+        self.meter.clone()
     }
 
     pub fn play(&self) {
@@ -1256,7 +1313,7 @@ mod tests {
             gains: [6.0, 3.0, 0.0, -3.0, -6.0],
         }));
 
-        let mut eq_source = EqualizerSource::new(decoder, state.clone());
+        let mut eq_source = EqualizerSource::new(decoder, state.clone(), LevelMeter::default());
         assert_eq!(eq_source.channels(), 1);
         assert_eq!(eq_source.sample_rate(), 8000);
         assert_eq!(eq_source.total_duration(), Some(Duration::from_secs(1)));

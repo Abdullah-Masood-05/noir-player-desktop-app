@@ -19,7 +19,7 @@ pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
     let (elapsed, total) = model.times();
     let has_track = model.current.is_some();
     let favourite = model.current.is_some_and(|index| model.is_favourite(index));
-    let intensity = if is_playing { 1.0 } else { 0.35 };
+    let meter = model.audio_meter();
 
     h_flex()
         .w_full()
@@ -53,16 +53,25 @@ pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
                                 .flex()
                                 .justify_end()
                                 .overflow_hidden()
-                                .child(waveform(26, 2.0, 2.0, 26.0, progress, intensity)),
+                                .child(waveform(
+                                    "bar-wave-left",
+                                    26,
+                                    2.0,
+                                    2.0,
+                                    26.0,
+                                    is_playing,
+                                    meter.clone(),
+                                )),
                         )
                         .child(transport(model, is_playing, has_track, is_light, cx))
                         .child(div().flex_1().min_w_0().overflow_hidden().child(waveform(
+                            "bar-wave-right",
                             26,
                             2.0,
                             2.0,
                             26.0,
-                            progress + 0.5,
-                            intensity,
+                            is_playing,
+                            meter.clone(),
                         ))),
                 )
                 .child(

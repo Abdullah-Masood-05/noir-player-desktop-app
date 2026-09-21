@@ -185,7 +185,8 @@ fn queue_row(
     };
     let playing = model.current == Some(index);
     let queue = model.queue.clone();
-    let phase = model.progress();
+    let meter = model.audio_meter();
+    let playing_now = model.is_playing;
 
     h_flex()
         .id(SharedString::from(format!("queue-row-{position}-{index}")))
@@ -244,7 +245,15 @@ fn queue_row(
             div()
                 .flex_shrink_0()
                 .w(px(20.0))
-                .child(waveform(4, 2.5, 2.0, 16.0, phase, 1.0))
+                .child(waveform(
+                    &format!("queue-wave-{index}"),
+                    4,
+                    2.5,
+                    2.0,
+                    16.0,
+                    playing_now,
+                    meter.clone(),
+                ))
                 .into_any_element()
         } else {
             div()

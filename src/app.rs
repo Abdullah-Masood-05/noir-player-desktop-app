@@ -1735,6 +1735,11 @@ impl NoirPlayerModel {
         }
     }
 
+    /// Peak meter of the audio being played, for the waveform strips.
+    pub fn audio_meter(&self) -> Option<crate::media::LevelMeter> {
+        self.player.as_ref().map(MediaPlayer::meter)
+    }
+
     pub fn now_playing(&self) -> Option<&Track> {
         self.current.and_then(|index| self.tracks.get(index))
     }

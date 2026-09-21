@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use gpui_kit::component::{h_flex, Theme, ThemeMode};
 use gpui_kit::*;
 
@@ -226,34 +228,78 @@ fn noise(seed: u32) -> f32 {
     (value % 1000) as f32 / 1000.0
 }
 
-/// A decorative audio waveform. `phase` animates the envelope while a song
-/// plays, `intensity` scales the bar heights and colour.
+/// Height of one bar, as a fraction of the strip. `phase` runs 0..1 and
+/// loops, which sends a wave travelling along the strip; `level` is the
+/// current audio peak, so the strip grows and shrinks with the music.
+fn bar_value(index: usize, bars: usize, phase: f32, level: f32) -> f32 {
+    let position = index as f32 / bars.max(1) as f32;
+    // Tallest in the middle, tapering to the ends.
+    let envelope = (position * std::f32::consts::PI).sin().powf(0.65);
+    let travelling = ((position * 6.0 - phase * std::f32::consts::TAU).sin() * 0.5 + 0.5) * 0.65;
+    // A fixed per-bar offset keeps the strip from looking like a pure sine.
+    let grain = noise(index as u32 * 7 + 13) * 0.35;
+    (envelope * (travelling + grain) * level).clamp(0.04, 1.0)
+}
+
+/// A waveform strip. While a song plays the bars ripple and follow the audio
+/// peak from `meter`; otherwise they hold a still, quieter shape and schedule
+/// no frames.
 pub fn waveform(
+    id: &str,
     bars: usize,
     bar_width: f32,
     gap: f32,
     height: f32,
-    phase: f32,
-    intensity: f32,
+    playing: bool,
+    meter: Option<crate::media::LevelMeter>,
 ) -> Div {
-    h_flex()
+    // Half a second per cycle reads as movement without looking frantic, and
+    // 30 frames a second is plenty for bars this small.
+    const PERIOD: Duration = Duration::from_millis(1400);
+    const MAX_FPS: f32 = 30.0;
+
+    let strip = h_flex()
         .items_center()
         .gap(px(gap))
         .h(px(height))
-        .flex_shrink_0()
-        .children((0..bars).map(|index| {
-            let position = index as f32 / bars.max(1) as f32;
-            // A raised-cosine envelope keeps the strip tallest in the middle.
-            let envelope = (position * std::f32::consts::PI).sin().powf(0.65);
-            let wobble = ((index as f32 * 0.8 + phase * 6.0).sin() * 0.5 + 0.5) * 0.55
-                + noise(index as u32 * 7 + 13) * 0.45;
-            let value = (envelope * wobble * intensity).clamp(0.05, 1.0);
-            div()
-                .w(px(bar_width))
-                .h(px((height * value).max(2.0)))
-                .rounded_full()
-                .bg(red_a(0.25 + value * 0.55))
-        }))
+        .flex_shrink_0();
+
+    if !playing {
+        // Resting state: a still waveform at a low level.
+        return strip.children((0..bars).map(|index| {
+            let value = bar_value(index, bars, 0.0, 0.45);
+            bar(bar_width, height, value)
+        }));
+    }
+
+    strip.children((0..bars).map(|index| {
+        let meter = meter.clone();
+        let base = bar_value(index, bars, 0.0, 0.7);
+        bar(bar_width, height, base).with_animation(
+            ElementId::from(SharedString::from(format!("{id}-{index}"))),
+            Animation::new(PERIOD).repeat_synced().with_max_fps(MAX_FPS),
+            move |element, phase| {
+                // Read the meter per frame so the bars track the audio, not
+                // whatever the level happened to be when this was built.
+                let level = meter
+                    .as_ref()
+                    .map(|meter| 0.35 + meter.level() * 0.85)
+                    .unwrap_or(0.8);
+                let value = bar_value(index, bars, phase, level);
+                element
+                    .h(px((height * value).max(2.0)))
+                    .bg(red_a(0.25 + value * 0.55))
+            },
+        )
+    }))
+}
+
+fn bar(bar_width: f32, height: f32, value: f32) -> Div {
+    div()
+        .w(px(bar_width))
+        .h(px((height * value).max(2.0)))
+        .rounded_full()
+        .bg(red_a(0.25 + value * 0.55))
 }
 
 /// Red top wash: rich vibrant crimson in dark mode (matching the classic Noir design),

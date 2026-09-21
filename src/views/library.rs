@@ -486,8 +486,8 @@ fn hero(model: &NoirPlayerModel, is_light: bool) -> Div {
     let songs = model.tracks.len();
     let albums = model.albums.len();
     let artists = model.artists.len();
-    let phase = model.progress();
-    let intensity = if model.is_playing { 1.0 } else { 0.55 };
+    let playing = model.is_playing;
+    let meter = model.audio_meter();
 
     div()
         .w_full()
@@ -524,7 +524,7 @@ fn hero(model: &NoirPlayerModel, is_light: bool) -> Div {
                 .absolute()
                 .right(px(28.0))
                 .top(px(30.0))
-                .child(waveform(44, 2.5, 3.0, 62.0, phase, intensity)),
+                .child(waveform("hero-wave", 44, 2.5, 3.0, 62.0, playing, meter)),
         )
         .child(
             v_flex()
@@ -807,7 +807,6 @@ pub fn song_row(
     let favourite = model.is_favourite(index);
     let group = SharedString::from(format!("song-group-{index}"));
     let play_queue = queue.clone();
-    let phase = model.progress();
 
     h_flex()
         .id(SharedString::from(format!("song-{index}")))
@@ -837,7 +836,16 @@ pub fn song_row(
                     dynamic_muted(is_light)
                 })
                 .child(if is_current {
-                    waveform(3, 2.5, 2.0, 14.0, phase, 1.0).into_any_element()
+                    waveform(
+                        &format!("row-wave-{index}"),
+                        3,
+                        2.5,
+                        2.0,
+                        14.0,
+                        model.is_playing,
+                        model.audio_meter(),
+                    )
+                    .into_any_element()
                 } else {
                     div().child(format!("{position}")).into_any_element()
                 }),

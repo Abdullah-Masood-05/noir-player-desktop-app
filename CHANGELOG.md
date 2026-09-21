@@ -20,12 +20,21 @@ fixes the Linux package so it installs on Fedora.
   read each frame, so they rise and fall with the track rather than holding a
   fixed shape. A paused player draws a still waveform and schedules no frames,
   and the animation honours the system reduce motion setting.
+- **Discover Works Out of the Box**: Release builds carry the service keys, so
+  Discover searches and downloads without an `.env` beside the application. A
+  key set in the environment still takes precedence. Keys compiled into a
+  published binary can be read by anyone who has it.
 
 ### Fixes
 
 - The RPM listed Arch package names, so installing it on Fedora failed with
   "nothing provides wayland". Its libraries are now required by soname, which
   every RPM distribution advertises.
+- The macOS application had no icon. The logo is 700x688, which matches none
+  of the sizes an icns accepts, so the bundler packed no icon and the check
+  skipped itself because it only ran when an icon was declared. The icon set
+  is now built at the sizes icns takes, and a bundle without an icon fails the
+  release instead of shipping.
 
 ### Downloads
 

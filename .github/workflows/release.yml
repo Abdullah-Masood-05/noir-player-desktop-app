@@ -117,6 +117,12 @@ jobs:
           key: release-${{ matrix.target }}
           cache-on-failure: false
       - name: Build locked release binary
+        # Discover keys are compiled into release builds, so an installed copy
+        # works without a .env beside it. Anyone with the binary can read them.
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
         run: cargo build --release --locked --target "$TARGET"
       - name: Install pinned cargo-bundle and prepare offline metadata
         if: runner.os != 'Windows'

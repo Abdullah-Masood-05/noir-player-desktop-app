@@ -4,6 +4,39 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.0.2]
+
+### A Waveform That Follows the Music
+
+Version 2.0.2 makes the waveform strips move with what is playing, and
+fixes the Linux package so it installs on Fedora.
+
+### Highlights & New Features
+
+- **Animated Waveform**: The strips in the greeting banner, the player bar,
+  the now playing page and the playing row now ripple on a shared clock, so
+  every strip in the window moves together.
+- **Audio Reactive Bars**: The audio path carries a peak meter that the bars
+  read each frame, so they rise and fall with the track rather than holding a
+  fixed shape. A paused player draws a still waveform and schedules no frames,
+  and the animation honours the system reduce motion setting.
+
+### Fixes
+
+- The RPM listed Arch package names, so installing it on Fedora failed with
+  "nothing provides wayland". Its libraries are now required by soname, which
+  every RPM distribution advertises.
+
+### Downloads
+
+- Windows (x64 MSI): `noir-player-2.0.2-windows-x64.msi`
+- Windows (x64 Setup): `noir-player-2.0.2-windows-x64-setup.exe`
+- macOS (Apple Silicon): `noir-player-2.0.2-macos-arm64.dmg`
+- Linux (Debian & Ubuntu): `noir-player-2.0.2-linux-x64.deb`
+- Linux (Fedora & RHEL): `noir-player-2.0.2-linux-x64.rpm`
+- Linux (Arch): `noir-player-2.0.2-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or `SHA256SUMS`
+
 ## [2.0.1]
 
 ### Updates Installed From Inside the App

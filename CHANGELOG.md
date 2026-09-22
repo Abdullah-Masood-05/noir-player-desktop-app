@@ -4,6 +4,57 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.1.0]
+
+### Performance: Large Libraries and Idle CPU
+
+Version 2.1.0 is a performance pass through the render and audio paths. It
+changes no user-facing feature except that song lists in large libraries now
+scroll without building rows off screen; everything else is the same
+interface running with less work behind it.
+
+### Highlights & New Features
+
+- **Virtualized Song Lists**: All Songs, Favourites, Recently Played, search
+  results and an album or artist's detail page now build only the rows the
+  viewport can show, instead of every row in the list on every render. A
+  50,000-song library previously built 50,000 rows per frame regardless of
+  how many were visible. The library home page keeps its greeting and shelf
+  as a single scrolling document with a 200-row preview, since virtualizing a
+  mix of hero, shelf and list content is not practical; "See all" opens the
+  full, virtualized list.
+- **Idle CPU**: The app used to re-render four times a second whether or not
+  anything had changed. It now does that only while something is actually
+  playing, downloading or updating.
+- **Cached Artwork and Search Keys**: Each track now carries a decoded image
+  and a lowercased search key built once when the library is scanned, rather
+  than rebuilding both on every frame and every keystroke.
+- **Lock-Free Equalizer**: The audio thread no longer takes a lock to read
+  the equalizer's gains on every sample. Settings publish through a
+  generation counter instead, removing a wait from the audio callback that
+  could, in principle, cause an audible dropout.
+- **Faster Scans**: Multi-folder scans reuse the file stat the scan already
+  did, reserve their result buffers once, and share one copy of artwork
+  bytes across every track from the same album instead of duplicating it per
+  track.
+
+### Fixes
+
+- Favourite, playlist and queue lookups scanned the whole library per lookup;
+  they now go through an index built once per change.
+- The virtualized lists now keep their scroll position and draw the same
+  scrollbar as every other list in the app.
+
+### Downloads
+
+- Windows (x64 MSI): `noir-player-2.1.0-windows-x64.msi`
+- Windows (x64 Setup): `noir-player-2.1.0-windows-x64-setup.exe`
+- macOS (Apple Silicon): `noir-player-2.1.0-macos-arm64.dmg`
+- Linux (Debian & Ubuntu): `noir-player-2.1.0-linux-x64.deb`
+- Linux (Fedora & RHEL): `noir-player-2.1.0-linux-x64.rpm`
+- Linux (Arch): `noir-player-2.1.0-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or `SHA256SUMS`
+
 ## [2.0.3]
 
 ### Clearing the Play History

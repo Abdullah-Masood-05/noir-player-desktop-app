@@ -8,7 +8,7 @@ use crate::app::{ActiveTab, NoirPlayerModel};
 use crate::views::library::{album_line, artwork_thumb};
 use crate::views::ui::{
     dynamic_bg, dynamic_border, dynamic_card, dynamic_muted, dynamic_row_hover, dynamic_subtitle,
-    dynamic_text, format_duration, icon_text, img_from_bytes, red, red_a, smooth_scroll, waveform,
+    dynamic_text, format_duration, icon_text, img_from_image, red, red_a, smooth_scroll, waveform,
     white,
 };
 use crate::widgets::player_bar::{seek_bar, volume_icon};
@@ -26,7 +26,9 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
             String::new(),
         ),
     };
-    let artwork = model.now_playing().and_then(|track| track.artwork.clone());
+    let artwork = model
+        .now_playing()
+        .and_then(|track| track.artwork_image.clone());
     let has_track = model.current.is_some();
     let meter = model.audio_meter();
 
@@ -702,7 +704,7 @@ fn action(id: &'static str, icon: MusicIcon, label: &'static str, is_light: bool
         .child(div().text_sm().child(label))
 }
 
-fn artwork_large(artwork: Option<std::sync::Arc<[u8]>>, is_playing: bool) -> Div {
+fn artwork_large(artwork: Option<std::sync::Arc<Image>>, is_playing: bool) -> Div {
     let base = div()
         .size(px(276.0))
         .rounded_3xl()
@@ -723,7 +725,7 @@ fn artwork_large(artwork: Option<std::sync::Arc<[u8]>>, is_playing: bool) -> Div
         });
 
     match artwork {
-        Some(bytes) => base.child(img_from_bytes(bytes).size_full().rounded_3xl()),
+        Some(image) => base.child(img_from_image(image).size_full().rounded_3xl()),
         None => base
             .bg(red_a(0.12))
             .flex()

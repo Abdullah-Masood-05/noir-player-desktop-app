@@ -930,6 +930,18 @@ impl NoirPlayerModel {
         sections
     }
 
+    /// Forgets the play history. Only the list is dropped; the songs and
+    /// everything else saved alongside them are untouched.
+    pub fn clear_recently_played(&mut self, cx: &mut Context<Self>) {
+        if self.store.recently_played.is_empty() {
+            return;
+        }
+        let mut next = self.store.clone();
+        next.recently_played.clear();
+        self.save_store(next, cx);
+        cx.notify();
+    }
+
     /// Library indices of the songs played most recently, newest first.
     pub fn recently_played_indices(&self) -> Vec<usize> {
         store::resolve_paths(&self.store.recently_played, &self.tracks)

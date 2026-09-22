@@ -406,18 +406,32 @@ fn songs_page(
         LibraryTab::AllSongs => "All Songs",
         _ => "Your Songs",
     };
-    // The home page previews the list; "See all" opens it on its own page.
-    let see_all = (tab == LibraryTab::Music && !searching).then(|| {
-        see_all_link(
-            "songs-see-all",
-            cx.listener(|this, _, _, cx| {
-                this.library_tab = LibraryTab::AllSongs;
-                this.library_detail = None;
-                cx.notify();
-            }),
+    // The home page previews the list, so it offers "See all"; the history
+    // page offers to forget what it is showing instead.
+    let trailing = if tab == LibraryTab::Music && !searching {
+        Some(
+            see_all_link(
+                "songs-see-all",
+                cx.listener(|this, _, _, cx| {
+                    this.library_tab = LibraryTab::AllSongs;
+                    this.library_detail = None;
+                    cx.notify();
+                }),
+            )
+            .into_any_element(),
         )
-        .into_any_element()
-    });
+    } else if tab == LibraryTab::RecentlyPlayed && !indices.is_empty() {
+        Some(
+            clear_history_link(
+                "recent-clear",
+                is_light,
+                cx.listener(|this, _, _, cx| this.clear_recently_played(cx)),
+            )
+            .into_any_element(),
+        )
+    } else {
+        None
+    };
     let empty = match tab {
         LibraryTab::Favourites => (
             "No favorites yet",
@@ -447,7 +461,7 @@ fn songs_page(
             .child(if indices.is_empty() {
                 empty_state(empty.0, empty.1, is_light).into_any_element()
             } else {
-                song_table(model, list_title, see_all, indices, None, is_light, cx)
+                song_table(model, list_title, trailing, indices, None, is_light, cx)
             }),
     )
     .into_any_element()
@@ -596,14 +610,24 @@ fn recently_played_shelf(
                         .text_color(dynamic_text(is_light))
                         .child("Recently Played"),
                 )
-                .child(see_all_link(
-                    "recent-see-all",
-                    cx.listener(|this, _, _, cx| {
-                        this.library_tab = LibraryTab::RecentlyPlayed;
-                        this.library_detail = None;
-                        cx.notify();
-                    }),
-                )),
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap(px(14.0))
+                        .child(clear_history_link(
+                            "shelf-clear",
+                            is_light,
+                            cx.listener(|this, _, _, cx| this.clear_recently_played(cx)),
+                        ))
+                        .child(see_all_link(
+                            "recent-see-all",
+                            cx.listener(|this, _, _, cx| {
+                                this.library_tab = LibraryTab::RecentlyPlayed;
+                                this.library_detail = None;
+                                cx.notify();
+                            }),
+                        )),
+                ),
         )
         .child(
             h_flex()
@@ -670,6 +694,25 @@ fn recently_played_shelf(
 }
 
 /// The song list: a column header, then one block per alphabetical section.
+/// Forgets the play history, beside the heading of whatever is showing it.
+pub fn clear_history_link(
+    id: &'static str,
+    is_light: bool,
+    handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    h_flex()
+        .id(id)
+        .items_center()
+        .gap(px(6.0))
+        .cursor_pointer()
+        .text_sm()
+        .text_color(dynamic_subtitle(is_light))
+        .hover(|s| s.text_color(red()))
+        .on_click(handler)
+        .child(icon_text(MusicIcon::Trash, 15.0))
+        .child("Clear history")
+}
+
 /// A "See all" link, matching the one above the recently played shelf.
 pub fn see_all_link(
     id: &'static str,

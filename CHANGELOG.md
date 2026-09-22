@@ -4,6 +4,29 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.0.3]
+
+### Clearing the Play History
+
+Version 2.0.3 lets you forget what you have played.
+
+### Highlights & New Features
+
+- **Clear History**: A "Clear history" action sits beside the Recently Played
+  heading, both on the shelf on the library home and on the Recently Played
+  page itself. It drops the saved list of played songs; the songs, favourites
+  and playlists are untouched.
+
+### Downloads
+
+- Windows (x64 MSI): `noir-player-2.0.3-windows-x64.msi`
+- Windows (x64 Setup): `noir-player-2.0.3-windows-x64-setup.exe`
+- macOS (Apple Silicon): `noir-player-2.0.3-macos-arm64.dmg`
+- Linux (Debian & Ubuntu): `noir-player-2.0.3-linux-x64.deb`
+- Linux (Fedora & RHEL): `noir-player-2.0.3-linux-x64.rpm`
+- Linux (Arch): `noir-player-2.0.3-linux-x64.pkg.tar.zst`
+- Verify any asset with the matching `.sha256` file or `SHA256SUMS`
+
 ## [2.0.2]
 
 ### A Waveform That Follows the Music

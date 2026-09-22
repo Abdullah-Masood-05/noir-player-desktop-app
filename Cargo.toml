@@ -1,6 +1,6 @@
 [package]
 name = "noir_player"
-version = "2.0.2"
+version = "2.0.3"
 edition = "2021"
 default-run = "noir_player"
 description = "Noir Player - A lightweight music player"

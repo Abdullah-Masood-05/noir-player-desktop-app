@@ -17,6 +17,13 @@ Version 2.0.3 lets you forget what you have played.
   page itself. It drops the saved list of played songs; the songs, favourites
   and playlists are untouched.
 
+### Fixes
+
+- "Resume on Startup" did nothing. The preference was saved and read back by
+  the settings row, but nothing acted on it. The song played most recently is
+  now re-opened and queued, paused at the start, once the library has been
+  scanned and only when nothing else is already playing.
+
 ### Downloads
 
 - Windows (x64 MSI): `noir-player-2.0.3-windows-x64.msi`

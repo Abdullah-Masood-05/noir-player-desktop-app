@@ -217,6 +217,8 @@ pub struct NoirPlayerModel {
     discover_cached: Vec<media::PreparedAudio>,
     discover_downloads: Vec<Track>,
     pub song_menu: Option<SongMenu>,
+    /// Resuming happens once, after the first scan finds the library.
+    resume_attempted: bool,
     pub sort_mode: SortMode,
     pub sort_menu_open: bool,
     pub media_menu_open: bool,
@@ -326,6 +328,7 @@ impl NoirPlayerModel {
             discover_cached: Vec::new(),
             discover_downloads: Vec::new(),
             song_menu: None,
+            resume_attempted: false,
             sort_mode: SortMode::TitleAsc,
             sort_menu_open: false,
             media_menu_open: false,
@@ -814,6 +817,7 @@ impl NoirPlayerModel {
                 player.stop();
             }
         }
+        self.resume_last_song(cx);
         cx.notify();
     }
 
@@ -1610,6 +1614,44 @@ impl NoirPlayerModel {
 
     pub fn play_index(&mut self, index: usize, cx: &mut Context<Self>) {
         if self.load_index(index, cx) {
+            self.queue = (0..self.tracks.len()).collect();
+        }
+    }
+
+    /// Loads a song and leaves it paused at the start, for "Resume on
+    /// startup". Nothing is recorded as played, because nothing played.
+    fn cue_index(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
+        let loaded = match (self.tracks.get(index), self.player.as_mut()) {
+            (Some(track), Some(player)) => player.load(&track.path).is_ok(),
+            _ => false,
+        };
+        if !loaded {
+            return false;
+        }
+        if let Some(player) = self.player.as_ref() {
+            player.set_volume(self.volume);
+        }
+        self.current = Some(index);
+        self.is_playing = false;
+        cx.notify();
+        true
+    }
+
+    /// Re-opens the song played most recently, paused and queued, when the
+    /// setting asks for it. Runs once per launch, after the first scan, and
+    /// only when nothing is already playing.
+    fn resume_last_song(&mut self, cx: &mut Context<Self>) {
+        if self.resume_attempted {
+            return;
+        }
+        self.resume_attempted = true;
+        if !self.store.resume_last_song || self.current.is_some() {
+            return;
+        }
+        let Some(index) = self.recently_played_indices().first().copied() else {
+            return;
+        };
+        if self.cue_index(index, cx) {
             self.queue = (0..self.tracks.len()).collect();
         }
     }

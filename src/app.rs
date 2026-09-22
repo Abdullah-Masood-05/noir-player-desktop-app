@@ -193,6 +193,9 @@ pub struct NoirPlayerModel {
     pub albums: Vec<(String, Vec<usize>)>,
     pub artists: Vec<(String, Vec<usize>)>,
     pub store: Store,
+    /// O(1) favourite lookup for the song list. Rebuilt whenever the store
+    /// is replaced; the serialized `Vec` stays the source of truth.
+    favourites_set: std::collections::HashSet<PathBuf>,
     store_path: Option<PathBuf>,
     pub storage_error: Option<String>,
     pub error: Option<String>,
@@ -280,6 +283,7 @@ impl NoirPlayerModel {
             cx.subscribe(&settings_search, |_, _, _: &InputEvent, cx| cx.notify()),
         ];
         let volume = store.volume;
+        let favourites_set = store.favourites.iter().cloned().collect();
         if let Some(player) = player.as_ref() {
             player.set_volume(volume);
             player.set_equalizer_enabled(store.equalizer_enabled);
@@ -303,6 +307,7 @@ impl NoirPlayerModel {
             albums: Vec::new(),
             artists: Vec::new(),
             store,
+            favourites_set,
             store_path,
             storage_error,
             error,
@@ -788,21 +793,28 @@ impl NoirPlayerModel {
                 errors.join("; ")
             ));
         }
-        let mut album_map: Vec<(String, Vec<usize>)> = Vec::new();
-        let mut artist_map: Vec<(String, Vec<usize>)> = Vec::new();
+        let mut album_groups: std::collections::HashMap<&str, Vec<usize>> =
+            std::collections::HashMap::with_capacity(tracks.len());
+        let mut artist_groups: std::collections::HashMap<&str, Vec<usize>> =
+            std::collections::HashMap::with_capacity(tracks.len());
         for (i, track) in tracks.iter().enumerate() {
-            match album_map.iter_mut().find(|(name, _)| *name == track.album) {
-                Some((_, list)) => list.push(i),
-                None => album_map.push((track.album.clone(), vec![i])),
-            }
-            match artist_map
-                .iter_mut()
-                .find(|(name, _)| *name == track.artist)
-            {
-                Some((_, list)) => list.push(i),
-                None => artist_map.push((track.artist.clone(), vec![i])),
-            }
+            album_groups
+                .entry(track.album.as_str())
+                .or_default()
+                .push(i);
+            artist_groups
+                .entry(track.artist.as_str())
+                .or_default()
+                .push(i);
         }
+        let mut album_map: Vec<(String, Vec<usize>)> = album_groups
+            .into_iter()
+            .map(|(name, list)| (name.to_owned(), list))
+            .collect();
+        let mut artist_map: Vec<(String, Vec<usize>)> = artist_groups
+            .into_iter()
+            .map(|(name, list)| (name.to_owned(), list))
+            .collect();
         album_map.sort_by_key(|a| a.0.to_lowercase());
         artist_map.sort_by_key(|a| a.0.to_lowercase());
         self.tracks = tracks;
@@ -853,13 +865,21 @@ impl NoirPlayerModel {
     }
 
     pub fn filtered_indices(&self, indices: Vec<usize>, cx: &App) -> Vec<usize> {
-        let query = self.library_search.read(cx).value();
+        // Lowercase + split the query once; each track tests its precomputed
+        // `search_key` with zero allocations.
+        let words = store::split_query(&self.library_search.read(cx).value());
+        if words.is_empty() {
+            return indices
+                .into_iter()
+                .filter(|&index| index < self.tracks.len())
+                .collect();
+        }
         indices
             .into_iter()
             .filter(|&index| {
-                self.tracks.get(index).is_some_and(|track| {
-                    store::matches_query(&track.title, &track.artist, &track.album, &query)
-                })
+                self.tracks
+                    .get(index)
+                    .is_some_and(|track| store::matches_search_key(&track.search_key, &words))
             })
             .collect()
     }
@@ -915,16 +935,23 @@ impl NoirPlayerModel {
     /// Splits sorted `indices` into the sections drawn in the song list. In an
     /// alphabetical order every section carries its letter heading; other
     /// orders return a single unlabelled section.
+    #[allow(dead_code)]
     pub fn letter_sections(&self, indices: Vec<usize>) -> Vec<(Option<char>, Vec<usize>)> {
+        self.letter_sections_slice(&indices)
+    }
+
+    /// Slice version: no ownership juggling for callers that share one queue
+    /// across many rows.
+    pub fn letter_sections_slice(&self, indices: &[usize]) -> Vec<(Option<char>, Vec<usize>)> {
         if !self.sort_mode.has_letter_sections() {
             return if indices.is_empty() {
                 Vec::new()
             } else {
-                vec![(None, indices)]
+                vec![(None, indices.to_vec())]
             };
         }
         let mut sections: Vec<(Option<char>, Vec<usize>)> = Vec::new();
-        for index in indices {
+        for &index in indices {
             let letter = section_letter(&self.tracks[index].title);
             match sections.last_mut() {
                 Some((Some(current), songs)) if *current == letter => songs.push(index),
@@ -1157,7 +1184,11 @@ impl NoirPlayerModel {
     pub fn is_favourite(&self, index: usize) -> bool {
         self.tracks
             .get(index)
-            .is_some_and(|track| self.store.favourites.contains(&track.path))
+            .is_some_and(|track| self.favourites_set.contains(&track.path))
+    }
+
+    fn rebuild_favourite_set(&mut self) {
+        self.favourites_set = self.store.favourites.iter().cloned().collect();
     }
 
     fn save_store(&mut self, next: Store, cx: &mut Context<Self>) -> bool {
@@ -1171,6 +1202,7 @@ impl NoirPlayerModel {
         match result {
             Ok(()) => {
                 self.store = next;
+                self.rebuild_favourite_set();
                 self.error = None;
                 cx.notify();
                 true
@@ -1571,17 +1603,22 @@ impl NoirPlayerModel {
     }
 
     pub fn tick(&mut self, cx: &mut Context<Self>) {
+        let mut dirty = false;
+
         if let Some(job) = &self.discover_audio_job {
             if let Ok(progress) = job.progress.lock() {
-                self.discover_audio_status = Some(format!(
-                    "{}: {}",
+                let next = format!(
+                    "{}: {progress}",
                     if job.preparing {
                         "Preparing audio"
                     } else {
                         "Download"
                     },
-                    progress
-                ));
+                );
+                if self.discover_audio_status.as_deref() != Some(next.as_str()) {
+                    self.discover_audio_status = Some(next);
+                    dirty = true;
+                }
             }
         }
         if let Some(job) = self.update_job.as_ref() {
@@ -1590,16 +1627,27 @@ impl NoirPlayerModel {
                 crate::update::UpdateStatus::Downloading { .. }
             ) {
                 use std::sync::atomic::Ordering;
-                self.update_status = crate::update::UpdateStatus::Downloading {
+                let next = crate::update::UpdateStatus::Downloading {
                     received: job.received.load(Ordering::Relaxed),
                     total: job.total.load(Ordering::Relaxed),
                 };
+                if self.update_status != next {
+                    self.update_status = next;
+                    dirty = true;
+                }
             }
         }
         if self.is_playing && self.player.as_ref().is_some_and(MediaPlayer::is_finished) {
             self.next(cx);
+            dirty = true;
         }
-        cx.notify();
+        // The scrubber / time labels only move while audio is actually playing.
+        if self.is_playing {
+            dirty = true;
+        }
+        if dirty {
+            cx.notify();
+        }
     }
 
     pub fn play_collection(&mut self, indices: Vec<usize>, index: usize, cx: &mut Context<Self>) {
@@ -1958,7 +2006,7 @@ impl Render for NoirPlayerModel {
                                 match active_tab {
                                     ActiveTab::Playlists => playlists::render_playlists(self, cx),
                                     ActiveTab::Discover => discover::render_discover(self, cx),
-                                    _ => library::render_library(self, cx),
+                                    _ => library::render_library(self, window, cx),
                                 },
                             )),
                     )

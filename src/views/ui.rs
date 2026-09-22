@@ -275,8 +275,10 @@ pub fn waveform(
     strip.children((0..bars).map(|index| {
         let meter = meter.clone();
         let base = bar_value(index, bars, 0.0, 0.7);
+        // One SharedString per strip per frame; per-bar ids are cheap clones.
+        let prefix = SharedString::from(id);
         bar(bar_width, height, base).with_animation(
-            ElementId::from(SharedString::from(format!("{id}-{index}"))),
+            ElementId::from((prefix, index)),
             Animation::new(PERIOD).repeat_synced().with_max_fps(MAX_FPS),
             move |element, phase| {
                 // Read the meter per frame so the bars track the audio, not
@@ -336,6 +338,7 @@ pub fn icon_text(kind: gpui_kit::assets::IconName, size: f32) -> Div {
         .child(icon(kind).size(px(size * 0.66)))
 }
 
+#[allow(dead_code)]
 pub fn img_from_bytes(bytes: std::sync::Arc<[u8]>) -> Img {
     let format = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         ImageFormat::Png
@@ -346,6 +349,13 @@ pub fn img_from_bytes(bytes: std::sync::Arc<[u8]>) -> Img {
         format,
         bytes.to_vec(),
     )))
+}
+
+/// Renders a scan-time cached cover with no copy and no hash. Prefer this
+/// over `img_from_bytes` everywhere; the latter copies and hashes the whole
+/// JPEG on every call (i.e. every row, every frame).
+pub fn img_from_image(image: std::sync::Arc<Image>) -> Img {
+    img(image)
 }
 
 pub fn format_duration(d: std::time::Duration) -> String {

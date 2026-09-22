@@ -78,14 +78,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ci-${{ matrix.target }}
-          cache-on-failure: false
+          cache-on-failure: true
           save-if: ${{ github.event_name != 'pull_request' }}
       - name: Check formatting
         run: cargo fmt --all -- --check
-      - name: Typecheck
-        run: cargo check --locked --all-targets --target "${{ matrix.target }}"
-      - name: Build
-        run: cargo build --locked --target "${{ matrix.target }}"
+      # `cargo test` already builds every target, and `cargo clippy
+      # --all-targets` subsumes `cargo check --all-targets`, so separate
+      # check/build steps would compile the same graph twice more.
       - name: Test without service credentials
         run: cargo test --locked --all-targets --target "${{ matrix.target }}"
       - name: Clippy

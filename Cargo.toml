@@ -73,12 +73,11 @@ taffy = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }
 
 [profile.dev.package."*"]
-codegen-units = 1
 debug = false
 strip = "symbols"
 
 [profile.release]
 codegen-units = 1
-lto = true
+lto = "thin"
 opt-level = 3
 strip = true

@@ -1,22 +1,37 @@
+use std::rc::Rc;
+
 use gpui_kit::assets::IconName as MusicIcon;
+use gpui_kit::base::{v_virtual_list, VirtualListScrollHandle};
 use gpui_kit::component::input::Input;
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
+/// Geometry `Size`, disambiguated from the component library's `Size` enum.
+use gpui_kit::Size as GpuiSize;
 use gpui_kit::*;
 
 use crate::app::{Collection, LibraryTab, NoirPlayerModel, SortMode};
 use crate::media::Track;
 use crate::views::ui::{
     dynamic_border, dynamic_divider, dynamic_hover, dynamic_muted, dynamic_panel,
-    dynamic_row_hover, dynamic_subtitle, dynamic_text, format_duration, icon_text, img_from_bytes,
+    dynamic_row_hover, dynamic_subtitle, dynamic_text, format_duration, icon_text, img_from_image,
     menu_transition, red, red_a, smooth_scroll, tab_transition, top_fade, waveform, white,
 };
 
 const CONTENT_PADDING: f32 = 24.0;
 const SORT_BUTTON_WIDTH: f32 = 170.0;
 const MEDIA_BUTTON_WIDTH: f32 = 160.0;
+const ROW_HEIGHT: f32 = 46.0;
+const HEADING_HEIGHT: f32 = 40.0;
+/// Home tab preview bound. The full queue is still handed to playback; only
+/// the rows built per frame are capped.
+const HOME_PREVIEW_ROWS: usize = 200;
 
-pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+pub fn render_library(
+    model: &mut NoirPlayerModel,
+    window: &mut Window,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Div {
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let tab = model.library_tab;
     let detail = model.library_detail.clone();
@@ -26,13 +41,13 @@ pub fn render_library(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMo
         Some(collection) => {
             let indices = model
                 .sorted_indices(model.filtered_indices(model.collection_indices(collection), cx));
-            collection_detail(model, collection.clone(), indices, is_light, cx)
+            collection_detail(model, collection.clone(), indices, window, is_light, cx)
         }
         None => match tab {
             LibraryTab::Music
             | LibraryTab::AllSongs
             | LibraryTab::Favourites
-            | LibraryTab::RecentlyPlayed => songs_page(model, tab, is_light, cx),
+            | LibraryTab::RecentlyPlayed => songs_page(model, tab, window, is_light, cx),
             LibraryTab::Albums | LibraryTab::Artists => collection_grid(model, tab, is_light, cx),
             LibraryTab::Folders => folder_grid(model, is_light, cx),
         },
@@ -392,10 +407,12 @@ fn media_menu(model: &NoirPlayerModel, is_light: bool, cx: &mut Context<NoirPlay
 fn songs_page(
     model: &NoirPlayerModel,
     tab: LibraryTab,
+    window: &mut Window,
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
 ) -> AnyElement {
     let indices = model.sorted_indices(model.filtered_indices(model.tab_indices(), cx));
+    let queue: Rc<[usize]> = Rc::from(indices.as_slice());
     let recent = model.recently_played_indices();
     let searching = !model.library_search.read(cx).value().is_empty();
     let show_hero = tab == LibraryTab::Music && !searching;
@@ -447,52 +464,95 @@ fn songs_page(
         ),
     };
 
-    smooth_scroll(
-        format!("library-scroll-{tab:?}"),
-        v_flex()
-            .w_full()
-            .px(px(CONTENT_PADDING))
-            .pb(px(20.0))
-            .gap(px(24.0))
-            .when(show_hero, |d| d.child(hero(model, is_light)))
-            .when(show_recent, |d| {
-                d.child(recently_played_shelf(model, recent, is_light, cx))
-            })
-            .child(if indices.is_empty() {
-                empty_state(empty.0, empty.1, is_light).into_any_element()
-            } else {
-                song_table(model, list_title, trailing, indices, None, is_light, cx)
-            }),
+    // The home page carries the hero and the shelf, so it scrolls as one
+    // document with a bounded preview. Every other list is virtualized: only
+    // the visible rows are built, no matter how large the library is.
+    if show_hero || show_recent {
+        let preview: Vec<usize> = indices.iter().copied().take(HOME_PREVIEW_ROWS).collect();
+        return smooth_scroll(
+            format!("library-scroll-{tab:?}"),
+            v_flex()
+                .w_full()
+                .px(px(CONTENT_PADDING))
+                .pb(px(20.0))
+                .gap(px(24.0))
+                .when(show_hero, |d| d.child(hero(model, is_light)))
+                .when(show_recent, |d| {
+                    d.child(recently_played_shelf(model, recent, is_light, cx))
+                })
+                .child(if indices.is_empty() {
+                    empty_state(empty.0, empty.1, is_light).into_any_element()
+                } else {
+                    song_table_inner(
+                        model, list_title, trailing, &preview, queue, None, is_light, cx,
+                    )
+                }),
+        )
+        .into_any_element();
+    }
+    if indices.is_empty() {
+        return smooth_scroll(
+            format!("library-scroll-{tab:?}"),
+            v_flex()
+                .w_full()
+                .px(px(CONTENT_PADDING))
+                .pb(px(20.0))
+                .child(empty_state(empty.0, empty.1, is_light)),
+        )
+        .into_any_element();
+    }
+
+    virtual_song_section(
+        model,
+        format!("library-virtual-{tab:?}"),
+        list_title,
+        trailing,
+        &indices,
+        queue,
+        None,
+        window,
+        is_light,
+        cx,
     )
-    .into_any_element()
 }
 
 fn collection_detail(
     model: &NoirPlayerModel,
     collection: Collection,
     indices: Vec<usize>,
+    window: &mut Window,
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
 ) -> AnyElement {
     let name = collection.name().to_string();
-    smooth_scroll(
-        format!("library-detail-{name}"),
-        v_flex()
-            .w_full()
-            .px(px(CONTENT_PADDING))
-            .pb(px(20.0))
-            .child(if indices.is_empty() {
-                empty_state(
+    if indices.is_empty() {
+        return smooth_scroll(
+            format!("library-detail-{name}"),
+            v_flex()
+                .w_full()
+                .px(px(CONTENT_PADDING))
+                .pb(px(20.0))
+                .child(empty_state(
                     "Nothing to play here",
                     "Album and artist details come from file tags.",
                     is_light,
-                )
-                .into_any_element()
-            } else {
-                song_table(model, "Songs", None, indices, None, is_light, cx)
-            }),
+                )),
+        )
+        .into_any_element();
+    }
+    let queue: Rc<[usize]> = Rc::from(indices.as_slice());
+    virtual_song_section(
+        model,
+        format!("library-detail-{name}"),
+        "Songs",
+        None,
+        &indices,
+        queue,
+        None,
+        window,
+        is_light,
+        cx,
     )
-    .into_any_element()
 }
 
 /// Greeting banner with the library totals.
@@ -636,11 +696,11 @@ fn recently_played_shelf(
                 .children(shown.iter().map(|&index| {
                     let queue = queue.clone();
                     let Some(track) = model.tracks.get(index) else {
-                        return div().id(SharedString::from(format!("recent-missing-{index}")));
+                        return div().id(("recent-missing", index));
                     };
                     let playing = model.current == Some(index);
                     v_flex()
-                        .id(SharedString::from(format!("recent-card-{index}")))
+                        .id(("recent-card", index))
                         .w(px(158.0))
                         .gap(px(8.0))
                         .cursor_pointer()
@@ -731,6 +791,145 @@ pub fn see_all_link(
         .child(icon_text(MusicIcon::ArrowRight, 16.0))
 }
 
+/// One flattened row of a virtualized song list.
+#[derive(Clone, Copy)]
+enum SongListRow {
+    Heading(char, usize),
+    Song { index: usize, position: usize },
+}
+
+fn flatten_rows(
+    model: &NoirPlayerModel,
+    indices: &[usize],
+) -> (Vec<SongListRow>, Rc<Vec<GpuiSize<Pixels>>>) {
+    let sections = model.letter_sections_slice(indices);
+    let mut rows = Vec::with_capacity(indices.len() + sections.len());
+    let mut sizes = Vec::with_capacity(indices.len() + sections.len());
+    let mut position = 0usize;
+    for (letter, songs) in &sections {
+        if let Some(letter) = letter {
+            rows.push(SongListRow::Heading(*letter, songs.len()));
+            sizes.push(size(px(800.0), px(HEADING_HEIGHT)));
+        }
+        for &index in songs {
+            position += 1;
+            rows.push(SongListRow::Song { index, position });
+            sizes.push(size(px(800.0), px(ROW_HEIGHT)));
+        }
+    }
+    (rows, Rc::new(sizes))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn virtual_song_list(
+    model: &NoirPlayerModel,
+    list_id: impl Into<ElementId>,
+    indices: &[usize],
+    queue: Rc<[usize]>,
+    playlist: Option<SharedString>,
+    window: &mut Window,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> AnyElement {
+    let list_id: ElementId = list_id.into();
+    // The scroll handle must survive across renders, or the list snaps back
+    // to the top on every re-render — which happens every tick while a song
+    // plays. `use_keyed_state` is the same mechanism `SmoothScroll` uses for
+    // exactly this reason: a fresh `VirtualListScrollHandle` each render
+    // would carry a fresh, zeroed offset.
+    let handle_state = window.use_keyed_state((list_id.clone(), "vlist-scroll"), cx, |_, _| {
+        VirtualListScrollHandle::new()
+    });
+    let handle = handle_state.read(cx).clone();
+
+    let (rows, item_sizes) = flatten_rows(model, indices);
+    let rows = Rc::new(rows);
+    let view = cx.entity();
+    let list = v_virtual_list(
+        view,
+        list_id.clone(),
+        item_sizes,
+        move |this, range, _, cx| {
+            range
+                .map(|position| match rows[position] {
+                    SongListRow::Heading(letter, count) => {
+                        letter_heading(letter, count, is_light).into_any_element()
+                    }
+                    SongListRow::Song { index, position } => song_row(
+                        this,
+                        index,
+                        position,
+                        queue.clone(),
+                        playlist.clone(),
+                        is_light,
+                        cx,
+                    ),
+                })
+                .collect::<Vec<_>>()
+        },
+    )
+    .track_scroll(&handle);
+
+    // A visible, draggable scrollbar overlay, matching every other scrollable
+    // view in the app (`smooth_scroll` pairs one the same way).
+    div()
+        .relative()
+        .size_full()
+        .child(list)
+        .child(
+            div().absolute().inset_0().child(
+                Scrollbar::vertical(&handle)
+                    .id((list_id, "scrollbar"))
+                    .viewport_from_layout(),
+            ),
+        )
+        .into_any_element()
+}
+
+/// A fixed title + column header with a virtualized list filling the rest of
+/// the view. Only the visible rows are built per frame.
+#[allow(clippy::too_many_arguments)]
+fn virtual_song_section(
+    model: &NoirPlayerModel,
+    list_id: impl Into<ElementId>,
+    title: &str,
+    trailing: Option<AnyElement>,
+    indices: &[usize],
+    queue: Rc<[usize]>,
+    playlist: Option<SharedString>,
+    window: &mut Window,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> AnyElement {
+    v_flex()
+        .w_full()
+        .flex_1()
+        .min_h_0()
+        .px(px(CONTENT_PADDING))
+        .pb(px(20.0))
+        .gap(px(10.0))
+        .child(
+            h_flex()
+                .w_full()
+                .flex_shrink_0()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .text_xl()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(dynamic_text(is_light))
+                        .child(title.to_string()),
+                )
+                .children(trailing),
+        )
+        .child(column_header(is_light))
+        .child(div().w_full().flex_1().min_h_0().child(virtual_song_list(
+            model, list_id, indices, queue, playlist, window, is_light, cx,
+        )))
+        .into_any_element()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn song_table(
     model: &NoirPlayerModel,
@@ -741,20 +940,48 @@ pub fn song_table(
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
 ) -> AnyElement {
-    let sections = model.letter_sections(indices.clone());
+    // One shared queue for every row: an Rc bump per row instead of a full
+    // Vec memcpy per row per frame.
+    let queue: Rc<[usize]> = Rc::from(indices.as_slice());
+    song_table_inner(
+        model,
+        title,
+        see_all,
+        &indices,
+        queue,
+        playlist.map(SharedString::from),
+        is_light,
+        cx,
+    )
+}
+
+/// Fully rendered (non-virtualized) song list for bounded surfaces: the home
+/// preview and playlist details.
+#[allow(clippy::too_many_arguments)]
+fn song_table_inner(
+    model: &NoirPlayerModel,
+    title: &str,
+    see_all: Option<AnyElement>,
+    render: &[usize],
+    queue: Rc<[usize]>,
+    playlist: Option<SharedString>,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> AnyElement {
+    let sections = model.letter_sections_slice(render);
     let mut position = 0usize;
     let mut list = v_flex().w_full().gap(px(2.0));
-    for (letter, songs) in sections {
+    for (letter, songs) in &sections {
         if let Some(letter) = letter {
-            list = list.child(letter_heading(letter, songs.len(), is_light));
+            list = list.child(letter_heading(*letter, songs.len(), is_light));
         }
-        for &index in &songs {
+        for &index in songs {
             position += 1;
             list = list.child(song_row(
                 model,
                 index,
                 position,
-                indices.clone(),
+                queue.clone(),
                 playlist.clone(),
                 is_light,
                 cx,
@@ -838,8 +1065,8 @@ pub fn song_row(
     model: &NoirPlayerModel,
     index: usize,
     position: usize,
-    queue: Vec<usize>,
-    playlist: Option<String>,
+    queue: Rc<[usize]>,
+    playlist: Option<SharedString>,
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
 ) -> AnyElement {
@@ -852,7 +1079,7 @@ pub fn song_row(
     let play_queue = queue.clone();
 
     h_flex()
-        .id(SharedString::from(format!("song-{index}")))
+        .id(("song", index))
         .group(group.clone())
         .w_full()
         .h(px(46.0))
@@ -866,7 +1093,7 @@ pub fn song_row(
             d.hover(move |s| s.bg(dynamic_row_hover(is_light)))
         })
         .on_click(cx.listener(move |this, _, _, cx| {
-            this.play_collection(play_queue.clone(), index, cx);
+            this.play_collection(play_queue.to_vec(), index, cx);
         }))
         .child(
             div()
@@ -951,7 +1178,7 @@ pub fn song_row(
                 .gap(px(4.0))
                 .child(
                     h_flex()
-                        .id(SharedString::from(format!("song-play-{index}")))
+                        .id(("song-play", index))
                         .h(px(26.0))
                         .px(px(10.0))
                         .items_center()
@@ -964,14 +1191,14 @@ pub fn song_row(
                         .group_hover(group.clone(), |s| s.opacity(1.0))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
-                            this.play_collection(queue.clone(), index, cx);
+                            this.play_collection(queue.to_vec(), index, cx);
                         }))
                         .child(icon_text(MusicIcon::Play, 12.0))
                         .child(div().text_xs().child("Play")),
                 )
                 .child(
                     div()
-                        .id(SharedString::from(format!("song-favourite-{index}")))
+                        .id(("song-favourite", index))
                         .size(px(26.0))
                         .rounded_full()
                         .flex()
@@ -996,7 +1223,7 @@ pub fn song_row(
                 )
                 .child(
                     div()
-                        .id(SharedString::from(format!("song-more-{index}")))
+                        .id(("song-more", index))
                         .size(px(26.0))
                         .rounded_full()
                         .flex()
@@ -1010,7 +1237,12 @@ pub fn song_row(
                         })
                         .on_click(cx.listener(move |this, _, window, cx| {
                             cx.stop_propagation();
-                            this.song_actions_dialog(index, playlist.clone(), window, cx);
+                            this.song_actions_dialog(
+                                index,
+                                playlist.clone().map(|name| name.to_string()),
+                                window,
+                                cx,
+                            );
                         }))
                         .child(icon_text(MusicIcon::Ellipsis, 16.0)),
                 ),
@@ -1029,24 +1261,26 @@ pub fn album_line(track: &Track) -> String {
 }
 
 pub fn artwork_thumb(track: &Track, size: f32) -> AnyElement {
-    match &track.artwork {
-        Some(bytes) => img_from_bytes(bytes.clone())
+    // The scan-time cached image renders with no copy and no hash. Falling
+    // back to raw bytes would re-pay both on every frame.
+    if let Some(image) = track.artwork_image.clone() {
+        return img_from_image(image)
             .size(px(size))
             .rounded_lg()
             .flex_shrink_0()
-            .into_any_element(),
-        None => div()
-            .size(px(size))
-            .rounded_lg()
-            .flex_shrink_0()
-            .bg(red_a(0.12))
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(red())
-            .child(icon_text(MusicIcon::Music4, size * 0.6))
-            .into_any_element(),
+            .into_any_element();
     }
+    div()
+        .size(px(size))
+        .rounded_lg()
+        .flex_shrink_0()
+        .bg(red_a(0.12))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(red())
+        .child(icon_text(MusicIcon::Music4, size * 0.6))
+        .into_any_element()
 }
 
 pub fn empty_state(msg: &str, sub: &str, is_light: bool) -> Div {
@@ -1222,22 +1456,24 @@ fn collection_card(
         .cursor_pointer()
         .hover(move |s| s.bg(dynamic_row_hover(is_light)))
         .on_click(handler)
-        .child(match artwork.and_then(|track| track.artwork.clone()) {
-            Some(bytes) => img_from_bytes(bytes)
-                .size(px(148.0))
-                .rounded_lg()
-                .into_any_element(),
-            None => div()
-                .size(px(148.0))
-                .rounded_lg()
-                .bg(red_a(0.12))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(red())
-                .child(icon_text(fallback, 64.0))
-                .into_any_element(),
-        })
+        .child(
+            match artwork.and_then(|track| track.artwork_image.clone()) {
+                Some(image) => img_from_image(image)
+                    .size(px(148.0))
+                    .rounded_lg()
+                    .into_any_element(),
+                None => div()
+                    .size(px(148.0))
+                    .rounded_lg()
+                    .bg(red_a(0.12))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(red())
+                    .child(icon_text(fallback, 64.0))
+                    .into_any_element(),
+            },
+        )
         .child(
             div()
                 .w_full()

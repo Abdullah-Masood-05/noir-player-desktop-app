@@ -21,9 +21,41 @@ pub struct Track {
     pub album: String,
     pub duration: Duration,
     pub artwork: Option<Arc<[u8]>>,
+    /// Decoded image built once at scan time. Rendering must use this;
+    /// building an `Image` per frame copies and hashes the whole JPEG.
+    pub artwork_image: Option<Arc<gpui_kit::Image>>,
     pub year: Option<u32>,
     /// Last modified time of the file, used for the "Recently added" ordering.
     pub added: Option<std::time::SystemTime>,
+    /// Lowercased `title\0artist\0album`, built once so search allocates nothing.
+    pub search_key: String,
+}
+
+impl Track {
+    pub fn build_search_key(title: &str, artist: &str, album: &str) -> String {
+        let mut key = String::with_capacity(title.len() + artist.len() + album.len() + 2);
+        key.push_str(&title.to_lowercase());
+        key.push('\0');
+        key.push_str(&artist.to_lowercase());
+        key.push('\0');
+        key.push_str(&album.to_lowercase());
+        key
+    }
+
+    pub fn rebuild_search_key(&mut self) {
+        self.search_key = Self::build_search_key(&self.title, &self.artist, &self.album);
+    }
+}
+
+/// Builds the render-ready image for `bytes` once. Callers must reuse the
+/// returned `Arc<Image>` instead of calling `Image::from_bytes` per frame.
+pub fn artwork_image_from_bytes(bytes: &Arc<[u8]>) -> Arc<gpui_kit::Image> {
+    let format = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+        gpui_kit::ImageFormat::Png
+    } else {
+        gpui_kit::ImageFormat::Jpeg
+    };
+    Arc::new(gpui_kit::Image::from_bytes(format, bytes.to_vec()))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -279,6 +311,7 @@ pub fn prepare_discover_audio(
     track.title = source.name.clone();
     track.artist = source.artist.clone();
     track.duration = duration;
+    track.rebuild_search_key();
     fs::OpenOptions::new()
         .write(true)
         .open(&temp.0)
@@ -299,7 +332,7 @@ pub fn prepare_discover_audio(
     Ok(prepared)
 }
 
-pub fn scan_folder(folder: &Path) -> ScanResult {
+fn scan_folder_inner(folder: &Path, sort: bool) -> ScanResult {
     let mut result = ScanResult::default();
     match fs::symlink_metadata(folder) {
         Ok(metadata) if is_link(&metadata) || !metadata.is_dir() => {
@@ -329,6 +362,9 @@ pub fn scan_folder(folder: &Path) -> ScanResult {
                     .unwrap_or(true)
         });
 
+    // Collect first so the result vectors can reserve exactly once.
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let mut entry_added: Vec<Option<std::time::SystemTime>> = Vec::new();
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -340,37 +376,38 @@ pub fn scan_folder(folder: &Path) -> ScanResult {
         if !entry.file_type().is_file() || !supported_extension(entry.path()) {
             continue;
         }
-        match read_track(entry.path()) {
+        // WalkDir already statted this entry; reuse it instead of a second stat.
+        let added = entry
+            .metadata()
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        entry_added.push(added);
+        paths.push(entry.into_path());
+    }
+    result.tracks.reserve(paths.len());
+    for (path, added) in paths.iter().zip(entry_added) {
+        match read_track_with_added(path, added) {
             Ok(track) => result.tracks.push(track),
             Err(error) => result.errors.push(format!("{error:#}")),
         }
     }
 
-    result.tracks.sort_by_cached_key(|track| {
-        (
-            track.title.to_lowercase(),
-            track.artist.to_lowercase(),
-            track.album.to_lowercase(),
-            track.path.clone(),
-        )
-    });
+    if sort {
+        sort_tracks(&mut result.tracks);
+    }
     result.errors.sort();
     result
 }
 
-pub fn scan_folders(folders: &[PathBuf]) -> ScanResult {
-    let mut result = ScanResult::default();
-    let mut seen = std::collections::HashSet::new();
-    for folder in folders {
-        let sub = scan_folder(folder);
-        result.errors.extend(sub.errors);
-        for track in sub.tracks {
-            if seen.insert(track.path.clone()) {
-                result.tracks.push(track);
-            }
-        }
-    }
-    result.tracks.sort_by_cached_key(|track| {
+/// Sorted single-folder scan. Kept as the stable single-folder entry point
+/// (and used by tests); multi-folder scans go through `scan_folders` so the
+/// final sort happens once.
+#[allow(dead_code)]
+pub fn scan_folder(folder: &Path) -> ScanResult {
+    scan_folder_inner(folder, true)
+}
+fn sort_tracks(tracks: &mut [Track]) {
+    tracks.sort_by_cached_key(|track| {
         (
             track.title.to_lowercase(),
             track.artist.to_lowercase(),
@@ -378,9 +415,89 @@ pub fn scan_folders(folders: &[PathBuf]) -> ScanResult {
             track.path.clone(),
         )
     });
+}
+
+pub fn scan_folders(folders: &[PathBuf]) -> ScanResult {
+    let mut result = ScanResult::default();
+    let mut total = 0usize;
+    let mut subs: Vec<ScanResult> = Vec::with_capacity(folders.len());
+    for folder in folders {
+        // Skip the per-folder sort; one final sort covers the merge.
+        let sub = scan_folder_inner(folder, false);
+        total += sub.tracks.len();
+        subs.push(sub);
+    }
+    result.tracks.reserve(total);
+    for sub in subs {
+        result.errors.extend(sub.errors);
+        result.tracks.extend(sub.tracks);
+    }
+    // Dedupe without cloning a PathBuf per track: adjacent after a path sort.
+    result.tracks.sort_by(|a, b| a.path.cmp(&b.path));
+    result.tracks.dedup_by(|a, b| a.path == b.path);
+    dedupe_artwork(&mut result.tracks);
+    sort_tracks(&mut result.tracks);
     result.errors.sort();
     result.errors.dedup();
     result
+}
+
+/// Tracks from one album carry byte-identical covers. Share one `Arc` per
+/// distinct byte string so 5,000 tracks don't hold 5,000 copies of the same
+/// few JPEGs.
+fn dedupe_artwork(tracks: &mut [Track]) {
+    use std::collections::HashMap;
+    use std::hash::{Hash, Hasher};
+    let mut seen: HashMap<u64, Vec<usize>> = HashMap::new();
+    // First pass: group candidate indices by content hash (one hash per track,
+    // at scan time only — never per frame).
+    let mut hashes: Vec<Option<u64>> = Vec::with_capacity(tracks.len());
+    for track in tracks.iter() {
+        hashes.push(track.artwork.as_ref().map(|bytes| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            bytes.len().hash(&mut hasher);
+            hasher.write(bytes);
+            hasher.finish()
+        }));
+    }
+    for (index, hash) in hashes.iter().enumerate() {
+        if let Some(hash) = hash {
+            seen.entry(*hash).or_default().push(index);
+        }
+    }
+    for indices in seen.into_values() {
+        if indices.len() < 2 {
+            continue;
+        }
+        // Confirm byte equality within a hash bucket before sharing.
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for index in indices {
+            let placed = groups.iter_mut().find(|group| {
+                tracks[index]
+                    .artwork
+                    .as_ref()
+                    .zip(tracks[group[0]].artwork.as_ref())
+                    .is_some_and(|(a, b)| std::sync::Arc::ptr_eq(a, b) || a.as_ref() == b.as_ref())
+            });
+            match placed {
+                Some(group) => group.push(index),
+                None => groups.push(vec![index]),
+            }
+        }
+        for group in groups {
+            if group.len() < 2 {
+                continue;
+            }
+            let (bytes, image) = (
+                tracks[group[0]].artwork.clone(),
+                tracks[group[0]].artwork_image.clone(),
+            );
+            for index in group.into_iter().skip(1) {
+                tracks[index].artwork = bytes.clone();
+                tracks[index].artwork_image = image.clone();
+            }
+        }
+    }
 }
 
 fn is_link(metadata: &fs::Metadata) -> bool {
@@ -395,18 +512,25 @@ fn is_link(metadata: &fs::Metadata) -> bool {
     }
 }
 
+const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "mp3", "flac", "wav", "ogg", "oga", "m4a", "mp4", "aac", "aif", "aiff",
+];
+
 fn supported_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "mp3" | "flac" | "wav" | "ogg" | "oga" | "m4a" | "mp4" | "aac" | "aif" | "aiff"
-            )
+            SUPPORTED_EXTENSIONS
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
         })
 }
 
 fn read_track(path: &Path) -> Result<Track> {
+    read_track_with_added(path, None)
+}
+
+fn read_track_with_added(path: &Path, added_hint: Option<std::time::SystemTime>) -> Result<Track> {
     let tagged = Probe::open(path)
         .map_err(|error| anyhow!("{}: {error}", path.display()))
         .and_then(|probe| {
@@ -429,15 +553,21 @@ fn read_track(path: &Path) -> Result<Track> {
                     path.display()
                 )
             })?;
+            let title = filename_title(path);
+            let artist = "Unknown Artist".to_owned();
+            let album = "Unknown Album".to_owned();
+            let search_key = Track::build_search_key(&title, &artist, &album);
             return Ok(Track {
                 path: path.to_path_buf(),
-                title: filename_title(path),
-                artist: "Unknown Artist".to_owned(),
-                album: "Unknown Album".to_owned(),
+                title,
+                artist,
+                album,
                 duration,
                 artwork: None,
+                artwork_image: None,
                 year: None,
-                added: file_added(path),
+                added: added_hint.or_else(|| file_added(path)),
+                search_key,
             });
         }
     };
@@ -465,7 +595,7 @@ fn read_track(path: &Path) -> Result<Track> {
         .filter(|value| !value.trim().is_empty())
         .map(|value| value.into_owned())
         .unwrap_or_else(|| "Unknown Album".to_owned());
-    let artwork = tag
+    let artwork: Option<Arc<[u8]>> = tag
         .and_then(|tag| {
             tag.pictures()
                 .iter()
@@ -473,9 +603,11 @@ fn read_track(path: &Path) -> Result<Track> {
                 .or_else(|| tag.pictures().first())
         })
         .map(|picture| Arc::from(picture.data()));
+    let artwork_image = artwork.as_ref().map(artwork_image_from_bytes);
 
     let year = tag.and_then(|tag| tag.year()).filter(|year| *year > 0);
 
+    let search_key = Track::build_search_key(&title, &artist, &album);
     Ok(Track {
         path: path.to_path_buf(),
         title,
@@ -483,8 +615,10 @@ fn read_track(path: &Path) -> Result<Track> {
         album,
         duration,
         artwork,
+        artwork_image,
         year,
-        added: file_added(path),
+        added: added_hint.or_else(|| file_added(path)),
+        search_key,
     })
 }
 
@@ -561,6 +695,66 @@ impl Default for EqualizerState {
         }
     }
 }
+
+/// Lock-free EQ parameters shared between the UI thread and the realtime
+/// audio thread. The old `RwLock<EqualizerState>` read on every sample (up to
+/// 44,100 lock acquisitions per second) risked priority inversion and audible
+/// dropouts; these atomics publish gains with a generation counter instead.
+pub struct EqualizerShared {
+    enabled: std::sync::atomic::AtomicBool,
+    gains_bits: [std::sync::atomic::AtomicU32; 5],
+    generation: std::sync::atomic::AtomicU64,
+}
+
+impl std::fmt::Debug for EqualizerShared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (enabled, gains, generation) = self.load();
+        f.debug_struct("EqualizerShared")
+            .field("enabled", &enabled)
+            .field("gains", &gains)
+            .field("generation", &generation)
+            .finish()
+    }
+}
+
+impl EqualizerShared {
+    pub fn new(enabled: bool, gains: [f32; 5]) -> Self {
+        Self {
+            enabled: std::sync::atomic::AtomicBool::new(enabled),
+            gains_bits: gains.map(|gain| std::sync::atomic::AtomicU32::new(gain.to_bits())),
+            generation: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Publish new parameters. Called from the UI thread only.
+    pub fn store(&self, enabled: bool, gains: [f32; 5]) {
+        use std::sync::atomic::Ordering;
+        for (slot, &gain) in self.gains_bits.iter().zip(gains.iter()) {
+            slot.store(gain.to_bits(), Ordering::Relaxed);
+        }
+        self.enabled.store(enabled, Ordering::Relaxed);
+        self.generation.fetch_add(1, Ordering::Release);
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn load(&self) -> (bool, [f32; 5], u64) {
+        use std::sync::atomic::Ordering;
+        let gains = self
+            .gains_bits
+            .each_ref()
+            .map(|slot| f32::from_bits(slot.load(Ordering::Relaxed)));
+        let enabled = self.enabled.load(Ordering::Relaxed);
+        let generation = self.generation.load(Ordering::Acquire);
+        (enabled, gains, generation)
+    }
+}
+
+/// Maximum channels per EQ frame. Five bands times eight channels fits in a
+/// few cache lines and avoids the old double `Vec` pointer chase.
+pub const MAX_EQ_CHANNELS: usize = 8;
 
 #[derive(Clone, Copy, Debug)]
 pub struct BiquadCoeffs {
@@ -657,45 +851,88 @@ pub struct EqualizerSource<I> {
     channels: u16,
     sample_rate: u32,
     current_channel: usize,
-    filters: Vec<Vec<BiquadChannel>>,
+    /// Flat `[band][channel]` storage: contiguous, no per-band heap pointer.
+    filters: [[BiquadChannel; MAX_EQ_CHANNELS]; 5],
     coeffs: [BiquadCoeffs; 5],
+    cached_enabled: bool,
     cached_gains: [f32; 5],
-    state: Arc<std::sync::RwLock<EqualizerState>>,
+    cached_generation: u64,
+    /// Bit `b` set while band `b` is enabled and audible (|gain| >= 0.05).
+    active_mask: u8,
+    shared: Arc<EqualizerShared>,
     meter: LevelMeter,
     peak: f32,
     metered: u32,
+}
+
+fn active_band_mask(enabled: bool, gains: &[f32; 5]) -> u8 {
+    if !enabled {
+        return 0;
+    }
+    let mut mask = 0u8;
+    for (b, &gain) in gains.iter().enumerate() {
+        if gain.abs() >= 0.05 {
+            mask |= 1 << b;
+        }
+    }
+    mask
 }
 
 impl<I> EqualizerSource<I>
 where
     I: Source<Item = f32>,
 {
-    pub fn new(input: I, state: Arc<std::sync::RwLock<EqualizerState>>, meter: LevelMeter) -> Self {
-        let channels = input.channels().max(1);
+    pub fn new(input: I, shared: Arc<EqualizerShared>, meter: LevelMeter) -> Self {
+        let channels = input.channels().max(1).min(MAX_EQ_CHANNELS as u16);
         let sample_rate = input.sample_rate().max(1);
-        let mut filters = Vec::with_capacity(5);
-        for _ in 0..5 {
-            filters.push(vec![BiquadChannel::default(); channels as usize]);
-        }
-        let initial_gains = state.read().map(|s| s.gains).unwrap_or([0.0; 5]);
+        let (enabled, gains, generation) = shared.load();
         let mut coeffs = [BiquadCoeffs::identity(); 5];
         for b in 0..5 {
-            coeffs[b] =
-                BiquadCoeffs::peaking(EQ_FREQUENCIES[b], initial_gains[b], sample_rate as f32, 1.0);
+            coeffs[b] = BiquadCoeffs::peaking(EQ_FREQUENCIES[b], gains[b], sample_rate as f32, 1.0);
         }
         Self {
             input,
             channels,
             sample_rate,
             current_channel: 0,
-            filters,
+            filters: [[BiquadChannel::default(); MAX_EQ_CHANNELS]; 5],
             coeffs,
-            cached_gains: initial_gains,
+            cached_enabled: enabled,
+            cached_gains: gains,
+            cached_generation: generation,
+            active_mask: active_band_mask(enabled, &gains),
             meter,
             peak: 0.0,
             metered: 0,
-            state,
+            shared,
         }
+    }
+
+    /// Backwards-compatible constructor for a fixed snapshot (used by tests
+    /// that don't need live updates).
+    #[allow(dead_code)]
+    pub fn new_static(input: I, state: &EqualizerState, meter: LevelMeter) -> Self {
+        Self::new(
+            input,
+            Arc::new(EqualizerShared::new(state.enabled, state.gains)),
+            meter,
+        )
+    }
+
+    #[inline]
+    fn poll_params(&mut self) {
+        let generation = self.shared.generation();
+        if generation == self.cached_generation {
+            return;
+        }
+        let (enabled, gains, generation) = self.shared.load();
+        self.cached_generation = generation;
+        self.cached_enabled = enabled;
+        self.cached_gains = gains;
+        for (b, &freq) in EQ_FREQUENCIES.iter().enumerate() {
+            self.coeffs[b] = BiquadCoeffs::peaking(freq, gains[b], self.sample_rate as f32, 1.0);
+        }
+        self.active_mask = active_band_mask(enabled, &gains);
     }
 }
 
@@ -727,7 +964,7 @@ where
     fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
         self.current_channel = 0;
         for band in &mut self.filters {
-            for ch in band {
+            for ch in band.iter_mut() {
                 *ch = BiquadChannel::default();
             }
         }
@@ -768,23 +1005,13 @@ where
         let sample = self.input.next()?;
         self.meter_sample(sample);
 
+        // One generation load per audio frame; coefficients rebuild only when
+        // the UI actually published new gains.
         if self.current_channel == 0 {
-            if let Ok(state) = self.state.read() {
-                if !state.enabled {
-                    self.current_channel = (self.current_channel + 1) % (self.channels as usize);
-                    return Some(sample);
-                }
-                if state.gains != self.cached_gains {
-                    self.cached_gains = state.gains;
-                    for (b, &freq) in EQ_FREQUENCIES.iter().enumerate() {
-                        self.coeffs[b] = BiquadCoeffs::peaking(
-                            freq,
-                            self.cached_gains[b],
-                            self.sample_rate as f32,
-                            1.0,
-                        );
-                    }
-                }
+            self.poll_params();
+            if self.active_mask == 0 {
+                self.current_channel = (self.current_channel + 1) % (self.channels as usize);
+                return Some(sample);
             }
         }
 
@@ -792,10 +1019,11 @@ where
         self.current_channel = (ch + 1) % (self.channels as usize);
 
         let mut out = sample;
-        for b in 0..5 {
-            if self.cached_gains[b].abs() >= 0.05 {
-                out = self.filters[b][ch].process(out, &self.coeffs[b]);
-            }
+        let mut mask = self.active_mask;
+        while mask != 0 {
+            let b = mask.trailing_zeros() as usize;
+            mask &= mask - 1;
+            out = self.filters[b][ch].process(out, &self.coeffs[b]);
         }
 
         Some(out.clamp(-1.0, 1.0))
@@ -808,6 +1036,7 @@ pub struct MediaPlayer {
     duration: Option<Duration>,
     loaded: bool,
     pub eq_state: Arc<std::sync::RwLock<EqualizerState>>,
+    eq_shared: Arc<EqualizerShared>,
     meter: LevelMeter,
 }
 
@@ -818,14 +1047,25 @@ impl MediaPlayer {
         let sink = Sink::connect_new(stream.mixer());
         sink.pause();
         let eq_state = Arc::new(std::sync::RwLock::new(EqualizerState::default()));
+        let eq_shared = Arc::new(EqualizerShared::new(false, [0.0; 5]));
         Ok(Self {
             sink,
             stream,
             duration: None,
             loaded: false,
             eq_state,
+            eq_shared,
             meter: LevelMeter::default(),
         })
+    }
+
+    fn publish_equalizer(&self) {
+        let (enabled, gains) = self
+            .eq_state
+            .read()
+            .map(|state| (state.enabled, state.gains))
+            .unwrap_or((false, [0.0; 5]));
+        self.eq_shared.store(enabled, gains);
     }
 
     pub fn load(&mut self, path: &Path) -> Result<()> {
@@ -842,7 +1082,7 @@ impl MediaPlayer {
         let sink = Sink::connect_new(self.stream.mixer());
         sink.pause();
         sink.set_volume(self.sink.volume());
-        let eq_source = EqualizerSource::new(decoder, self.eq_state.clone(), self.meter.clone());
+        let eq_source = EqualizerSource::new(decoder, self.eq_shared.clone(), self.meter.clone());
         sink.append(eq_source);
         self.sink.stop();
         self.sink = sink;
@@ -921,12 +1161,24 @@ impl MediaPlayer {
         if let Ok(mut state) = self.eq_state.write() {
             state.enabled = enabled;
         }
+        let gains = self
+            .eq_state
+            .read()
+            .map(|state| state.gains)
+            .unwrap_or([0.0; 5]);
+        self.eq_shared.store(enabled, gains);
     }
 
     pub fn set_equalizer_gains(&self, gains: [f32; 5]) {
         if let Ok(mut state) = self.eq_state.write() {
             state.gains = gains;
         }
+        let enabled = self
+            .eq_state
+            .read()
+            .map(|state| state.enabled)
+            .unwrap_or(false);
+        self.eq_shared.store(enabled, gains);
     }
 
     #[allow(dead_code)]
@@ -935,6 +1187,7 @@ impl MediaPlayer {
             if let Ok(mut state) = self.eq_state.write() {
                 state.gains[band] = gain_db.clamp(-12.0, 12.0);
             }
+            self.publish_equalizer();
         }
     }
 
@@ -1308,12 +1561,12 @@ mod tests {
         write_wav(&path);
         let decoder = decode_file(&path).unwrap();
 
-        let state = Arc::new(std::sync::RwLock::new(EqualizerState {
+        let state = EqualizerState {
             enabled: true,
             gains: [6.0, 3.0, 0.0, -3.0, -6.0],
-        }));
+        };
 
-        let mut eq_source = EqualizerSource::new(decoder, state.clone(), LevelMeter::default());
+        let mut eq_source = EqualizerSource::new_static(decoder, &state, LevelMeter::default());
         assert_eq!(eq_source.channels(), 1);
         assert_eq!(eq_source.sample_rate(), 8000);
         assert_eq!(eq_source.total_duration(), Some(Duration::from_secs(1)));

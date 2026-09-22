@@ -210,23 +210,47 @@ pub fn validate_name<'a>(
     Ok(name.to_owned())
 }
 
+#[allow(dead_code)]
 pub fn matches_query(title: &str, artist: &str, album: &str, query: &str) -> bool {
-    let fields = [
-        title.to_lowercase(),
-        artist.to_lowercase(),
-        album.to_lowercase(),
-    ];
+    // Compatibility wrapper (used by tests). The render hot path uses
+    // `matches_search_key` against the precomputed per-track key instead.
+    let key = crate::media::Track::build_search_key(title, artist, album);
+    matches_search_key(&key, &split_query(query))
+}
+
+/// Zero-allocation search check against a track's precomputed `search_key`.
+/// The query is lowercased once by the caller (`filtered_indices`), not once
+/// per track.
+pub fn matches_search_key(search_key: &str, query_lower_words: &[String]) -> bool {
+    query_lower_words
+        .iter()
+        .all(|word| search_key.contains(word))
+}
+
+/// Lowercase + split the query once. Returns the words to test each track's
+/// `search_key` against with `matches_search_key`.
+pub fn split_query(query: &str) -> Vec<String> {
     query
         .to_lowercase()
         .split_whitespace()
-        .all(|word| fields.iter().any(|field| field.contains(word)))
+        .map(str::to_owned)
+        .collect()
 }
 
 pub fn resolve_paths(paths: &[PathBuf], tracks: &[Track]) -> Vec<usize> {
-    paths
-        .iter()
-        .filter_map(|path| tracks.iter().position(|track| &track.path == path))
-        .collect()
+    use std::collections::HashMap;
+    // One index over the library instead of a linear scan per path.
+    let mut index: HashMap<&Path, usize> = HashMap::with_capacity(tracks.len());
+    for (position, track) in tracks.iter().enumerate() {
+        index.entry(track.path.as_path()).or_insert(position);
+    }
+    let mut out = Vec::with_capacity(paths.len().min(tracks.len()));
+    for path in paths {
+        if let Some(&position) = index.get(path.as_path()) {
+            out.push(position);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -346,8 +370,10 @@ mod tests {
             album: String::new(),
             duration: Default::default(),
             artwork: None,
+            artwork_image: None,
             year: None,
             added: None,
+            search_key: Track::build_search_key("", "", ""),
         };
         let paths = vec![
             PathBuf::from("b.mp3"),

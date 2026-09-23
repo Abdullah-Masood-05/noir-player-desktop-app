@@ -231,6 +231,47 @@ pub fn default_music_folder() -> Option<PathBuf> {
     dirs::audio_dir()
 }
 
+fn discover_cache_folder() -> Option<PathBuf> {
+    Some(dirs::cache_dir()?.join("noir-player").join("discover"))
+}
+
+/// How old a leftover preview has to be before it is treated as abandoned.
+/// Previews are deleted as the app exits, so anything this old belongs to a
+/// session that was killed or crashed.
+const DISCOVER_CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Deletes Discover previews left behind by a session that did not exit
+/// cleanly. Nothing else ever reclaims them, so the cache folder otherwise
+/// keeps a few megabytes for every preview played in such a session, forever.
+pub fn sweep_discover_cache() -> usize {
+    discover_cache_folder().map_or(0, |folder| sweep_abandoned(&folder, DISCOVER_CACHE_TTL))
+}
+
+/// Removes files in `folder` last modified at least `ttl` ago. Deliberately
+/// age-based rather than exhaustive: a second copy of the app running at the
+/// same time has previews of its own in here that are still in use.
+fn sweep_abandoned(folder: &Path, ttl: Duration) -> usize {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let abandoned = metadata.is_file()
+            && metadata
+                .modified()
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age >= ttl);
+        if abandoned && fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 pub struct PreparedAudio {
     pub track: Track,
     remove_on_drop: bool,
@@ -370,10 +411,8 @@ pub fn prepare_discover_audio(
             .or_else(default_music_folder)
             .ok_or_else(|| anyhow!("Could not locate the download music folder."))?
     } else {
-        dirs::cache_dir()
+        discover_cache_folder()
             .ok_or_else(|| anyhow!("Could not locate the audio cache folder."))?
-            .join("noir-player")
-            .join("discover")
     };
     fs::create_dir_all(&folder)
         .map_err(|_| anyhow!("Could not create the audio folder. Check permissions."))?;
@@ -1860,6 +1899,30 @@ mod tests {
     /// Noise rather than a gradient: real cover art is photographic, and a
     /// smooth synthetic image compresses so well that re-encoding it would
     /// legitimately grow it.
+    #[test]
+    fn abandoned_previews_are_swept_and_current_ones_are_kept() {
+        let temp = TempDir::new();
+        let leftover = temp.0.join("Some Song.mp3");
+        fs::write(&leftover, b"audio").unwrap();
+        let nested = temp.0.join("nested");
+        fs::create_dir(&nested).unwrap();
+
+        // A long time-to-live spares everything, including a preview written a
+        // moment ago by another running copy of the app.
+        assert_eq!(sweep_abandoned(&temp.0, Duration::from_secs(86_400)), 0);
+        assert!(leftover.is_file());
+
+        assert_eq!(sweep_abandoned(&temp.0, Duration::ZERO), 1);
+        assert!(!leftover.exists());
+        assert!(nested.is_dir(), "directories are not swept");
+    }
+
+    #[test]
+    fn sweeping_a_folder_that_is_not_there_is_not_an_error() {
+        let temp = TempDir::new();
+        assert_eq!(sweep_abandoned(&temp.0.join("missing"), Duration::ZERO), 0);
+    }
+
     fn encoded_artwork(width: u32, height: u32) -> Arc<[u8]> {
         let mut seed = 0x2545_F491_4F6C_DD1D_u64;
         let source = image::RgbaImage::from_fn(width, height, |_, _| {

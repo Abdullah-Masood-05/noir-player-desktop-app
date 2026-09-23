@@ -379,6 +379,10 @@ impl NoirPlayerModel {
             })
             .detach();
         }
+        // Reclaim previews from a session that was killed before it could.
+        cx.background_executor()
+            .spawn(async { crate::media::sweep_discover_cache() })
+            .detach();
         model.rescan(cx);
         model
     }

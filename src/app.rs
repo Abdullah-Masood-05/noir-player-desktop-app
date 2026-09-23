@@ -196,6 +196,11 @@ pub struct NoirPlayerModel {
     /// O(1) favourite lookup for the song list. Rebuilt whenever the store
     /// is replaced; the serialized `Vec` stays the source of truth.
     favourites_set: std::collections::HashSet<PathBuf>,
+    /// The now-playing cover at hero resolution, and the track it belongs to.
+    /// Exactly one is kept: the renderer holds every image it has drawn until it
+    /// is told to drop it, so caching one per track would grow resident memory
+    /// by a few hundred kilobytes for every song played.
+    hero_cover: Option<(PathBuf, std::sync::Arc<RenderImage>)>,
     store_path: Option<PathBuf>,
     pub storage_error: Option<String>,
     pub error: Option<String>,
@@ -308,6 +313,7 @@ impl NoirPlayerModel {
             artists: Vec::new(),
             store,
             favourites_set,
+            hero_cover: None,
             store_path,
             storage_error,
             error,
@@ -1845,6 +1851,40 @@ impl NoirPlayerModel {
     pub fn now_playing(&self) -> Option<&Track> {
         self.current.and_then(|index| self.tracks.get(index))
     }
+
+    /// The now-playing cover at the size the hero draws it. Built on the way to
+    /// the screen rather than at scan time, so a library's worth of covers is
+    /// never held at hero resolution, and released as soon as the track changes.
+    pub fn hero_cover(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<std::sync::Arc<RenderImage>> {
+        let Some((path, bytes)) = self
+            .now_playing()
+            .map(|track| (track.path.clone(), track.artwork.clone()))
+        else {
+            self.release_hero_cover(window, cx);
+            return None;
+        };
+        if let Some((cached, image)) = &self.hero_cover {
+            if *cached == path {
+                return Some(image.clone());
+            }
+        }
+        self.release_hero_cover(window, cx);
+        let image = std::sync::Arc::new(crate::media::hero_image(&bytes?)?);
+        self.hero_cover = Some((path, image.clone()));
+        Some(image)
+    }
+
+    fn release_hero_cover(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
+        if let Some((_, image)) = self.hero_cover.take() {
+            // Dropping the `Arc` frees the pixels, but the renderer's texture
+            // for them lives until this call; nothing else will make it.
+            let _ = window.drop_image(image);
+        }
+    }
 }
 
 impl Render for NoirPlayerModel {
@@ -1985,7 +2025,7 @@ impl Render for NoirPlayerModel {
                     .min_h_0()
                     .w_full()
                     .overflow_hidden()
-                    .child(player::render_player(self, cx))
+                    .child(player::render_player(self, window, cx))
                     .into_any_element()
             } else {
                 h_flex()

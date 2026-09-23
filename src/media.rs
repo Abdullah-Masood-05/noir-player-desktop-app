@@ -1,10 +1,13 @@
+use std::borrow::Cow;
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
+use image::{ImageDecoder, ImageEncoder};
 use lofty::config::{ParseOptions, ParsingMode};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::PictureType;
@@ -20,10 +23,17 @@ pub struct Track {
     pub artist: String,
     pub album: String,
     pub duration: Duration,
+    /// The cover re-encoded down to `HERO_EDGE`, kept only so the now-playing
+    /// hero can be built on demand. A track never holds the original blob: a
+    /// 3000px embedded cover would cost megabytes per album for pixels no part
+    /// of the UI ever draws.
     pub artwork: Option<Arc<[u8]>>,
-    /// Decoded image built once at scan time. Rendering must use this;
-    /// building an `Image` per frame copies and hashes the whole JPEG.
-    pub artwork_image: Option<Arc<gpui_kit::Image>>,
+    /// The cover every list, card and thumbnail draws, decoded once at scan
+    /// time and bounded to `COVER_EDGE`. Handing the renderer a decoded image
+    /// keeps the pixels ours: an encoded `Image` is decoded into a global cache
+    /// that is never evicted, so every cover drawn would be retained at its
+    /// full embedded size for the life of the process.
+    pub artwork_image: Option<Arc<gpui_kit::RenderImage>>,
     pub year: Option<u32>,
     /// Last modified time of the file, used for the "Recently added" ordering.
     pub added: Option<std::time::SystemTime>,
@@ -47,15 +57,168 @@ impl Track {
     }
 }
 
-/// Builds the render-ready image for `bytes` once. Callers must reuse the
-/// returned `Arc<Image>` instead of calling `Image::from_bytes` per frame.
-pub fn artwork_image_from_bytes(bytes: &Arc<[u8]>) -> Arc<gpui_kit::Image> {
-    let format = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        gpui_kit::ImageFormat::Png
-    } else {
-        gpui_kit::ImageFormat::Jpeg
+/// Longest edge of the cover cached for every track. The largest cover the UI
+/// draws outside the now-playing hero is a 158px card, and the extra headroom
+/// keeps that sharp on a display scaled past 100%. Costs 147KB of resident
+/// memory per distinct cover, where a 1300px embedded cover costs 6.5MB decoded.
+const COVER_EDGE: u32 = 192;
+/// Longest edge of the bytes the 276px now-playing hero is built from. Kept
+/// encoded rather than decoded because only one hero exists at a time.
+const HERO_EDGE: u32 = 320;
+/// Quality for the re-encoded hero. The source is already lossy and this is
+/// only ever drawn at 276px.
+const HERO_QUALITY: u8 = 86;
+
+/// Decodes `bytes` once and returns the cover every list draws plus the bytes
+/// the hero is built from. Artwork that will not decode yields `None`, which
+/// leaves the track looking like it carries no cover at all.
+fn build_cover(bytes: &Arc<[u8]>) -> Option<(Arc<gpui_kit::RenderImage>, Arc<[u8]>)> {
+    let decoded = decode_artwork(bytes)?;
+    let cover = render_image(fit_within(&decoded, COVER_EDGE));
+
+    let scaled = fit_within(&decoded, HERO_EDGE);
+    let shrunk = matches!(scaled, Cow::Owned(_));
+    let hero = match encode_hero(&scaled) {
+        // A cover that already fit can re-encode larger than it arrived, so keep
+        // whichever of the two is less to hold. One that had to be scaled down
+        // has no choice: the bytes it came in are the ones worth dropping.
+        Some(encoded) if shrunk || encoded.len() < bytes.len() => encoded,
+        _ => bytes.clone(),
     };
-    Arc::new(gpui_kit::Image::from_bytes(format, bytes.to_vec()))
+    Some((Arc::new(cover), hero))
+}
+
+/// Builds the now-playing hero from the bytes `build_cover` kept.
+pub fn hero_image(bytes: &[u8]) -> Option<gpui_kit::RenderImage> {
+    decode_artwork(bytes).map(|decoded| render_image(Cow::Owned(decoded)))
+}
+
+fn decode_artwork(bytes: &[u8]) -> Option<image::RgbaImage> {
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    // Cover art lifted from a photo carries an orientation tag; without this it
+    // is drawn on its side.
+    let orientation = decoder.orientation().ok()?;
+    let mut decoded = image::DynamicImage::from_decoder(decoder).ok()?;
+    decoded.apply_orientation(orientation);
+    Some(decoded.into_rgba8())
+}
+
+/// Scales `source` down so its longest edge is at most `max_edge`, borrowing
+/// when it is already small enough.
+fn fit_within(source: &image::RgbaImage, max_edge: u32) -> Cow<'_, image::RgbaImage> {
+    let (width, height) = source.dimensions();
+    let longest = width.max(height);
+    if longest <= max_edge || longest == 0 {
+        return Cow::Borrowed(source);
+    }
+    let scale = f64::from(max_edge) / f64::from(longest);
+    let scaled = |edge: u32| ((f64::from(edge) * scale).round() as u32).max(1);
+    Cow::Owned(image::imageops::resize(
+        source,
+        scaled(width),
+        scaled(height),
+        image::imageops::FilterType::Triangle,
+    ))
+}
+
+fn render_image(rgba: Cow<'_, image::RgbaImage>) -> gpui_kit::RenderImage {
+    let mut buffer = rgba.into_owned();
+    // The renderer reads BGRA.
+    for pixel in buffer.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+    gpui_kit::RenderImage::new(vec![image::Frame::new(buffer)])
+}
+
+fn encode_hero(rgba: &image::RgbaImage) -> Option<Arc<[u8]>> {
+    let mut out = Vec::new();
+    // JPEG has no alpha, so cover art that uses it stays PNG rather than being
+    // flattened onto black.
+    if rgba.pixels().any(|pixel| pixel.0[3] != u8::MAX) {
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(
+                rgba.as_raw(),
+                rgba.width(),
+                rgba.height(),
+                image::ExtendedColorType::Rgba8,
+            )
+            .ok()?;
+        return Some(Arc::from(out));
+    }
+    let rgb = image::DynamicImage::ImageRgba8(rgba.clone()).into_rgb8();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, HERO_QUALITY)
+        .encode(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )
+        .ok()?;
+    Some(Arc::from(out))
+}
+
+/// One worker per core, never more than there is work for.
+fn worker_count(items: usize) -> usize {
+    if items < 2 {
+        return items;
+    }
+    std::thread::available_parallelism()
+        .map_or(1, |count| count.get())
+        .min(items)
+}
+
+/// Runs `work` over every item across all cores and returns the results in
+/// input order. Scanning is the one place the app does sustained CPU work —
+/// tag parsing and cover decoding are per-file and independent — and it used to
+/// run on a single thread.
+fn map_parallel<T, R, F>(items: &[T], work: F) -> Vec<R>
+where
+    T: Sync,
+    R: Send,
+    F: Fn(&T) -> R + Sync,
+{
+    let workers = worker_count(items.len());
+    if workers <= 1 {
+        return items.iter().map(work).collect();
+    }
+
+    let cursor = AtomicUsize::new(0);
+    let parts: Vec<Vec<(usize, R)>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                let (cursor, work) = (&cursor, &work);
+                scope.spawn(move || {
+                    let mut done = Vec::new();
+                    loop {
+                        // A shared cursor rather than fixed chunks: files vary
+                        // enormously in size, so chunking would leave one worker
+                        // grinding while the rest sat idle.
+                        let index = cursor.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(index) else { break };
+                        done.push((index, work(item)));
+                    }
+                    done
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().expect("scan worker panicked"))
+            .collect()
+    });
+
+    let mut slots: Vec<Option<R>> = (0..items.len()).map(|_| None).collect();
+    for (index, value) in parts.into_iter().flatten() {
+        slots[index] = Some(value);
+    }
+    slots
+        .into_iter()
+        .map(|slot| slot.expect("every index is claimed by exactly one worker"))
+        .collect()
 }
 
 #[derive(Clone, Debug, Default)]
@@ -362,9 +525,9 @@ fn scan_folder_inner(folder: &Path, sort: bool) -> ScanResult {
                     .unwrap_or(true)
         });
 
-    // Collect first so the result vectors can reserve exactly once.
-    let mut paths: Vec<PathBuf> = Vec::new();
-    let mut entry_added: Vec<Option<std::time::SystemTime>> = Vec::new();
+    // Walking is inherently serial; collect the whole list first so the reads
+    // can be spread across every core.
+    let mut found: Vec<(PathBuf, Option<std::time::SystemTime>)> = Vec::new();
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -381,18 +544,20 @@ fn scan_folder_inner(folder: &Path, sort: bool) -> ScanResult {
             .metadata()
             .ok()
             .and_then(|metadata| metadata.modified().ok());
-        entry_added.push(added);
-        paths.push(entry.into_path());
+        found.push((entry.into_path(), added));
     }
-    result.tracks.reserve(paths.len());
-    for (path, added) in paths.iter().zip(entry_added) {
-        match read_track_with_added(path, added) {
+
+    result.tracks.reserve(found.len());
+    for read in map_parallel(&found, |(path, added)| read_track_with_added(path, *added)) {
+        match read {
             Ok(track) => result.tracks.push(track),
             Err(error) => result.errors.push(format!("{error:#}")),
         }
     }
 
     if sort {
+        // The standalone entry point has no later pass to attach covers.
+        attach_covers(&mut result.tracks);
         sort_tracks(&mut result.tracks);
     }
     result.errors.sort();
@@ -435,66 +600,70 @@ pub fn scan_folders(folders: &[PathBuf]) -> ScanResult {
     // Dedupe without cloning a PathBuf per track: adjacent after a path sort.
     result.tracks.sort_by(|a, b| a.path.cmp(&b.path));
     result.tracks.dedup_by(|a, b| a.path == b.path);
-    dedupe_artwork(&mut result.tracks);
+    attach_covers(&mut result.tracks);
     sort_tracks(&mut result.tracks);
     result.errors.sort();
     result.errors.dedup();
     result
 }
 
-/// Tracks from one album carry byte-identical covers. Share one `Arc` per
-/// distinct byte string so 5,000 tracks don't hold 5,000 copies of the same
-/// few JPEGs.
-fn dedupe_artwork(tracks: &mut [Track]) {
+/// Groups tracks by the exact bytes of their cover. Tracks from one album carry
+/// byte-identical covers, so this is what keeps an album from decoding, scaling
+/// and holding the same JPEG once per track.
+fn artwork_groups(tracks: &[Track]) -> Vec<(Arc<[u8]>, Vec<usize>)> {
+    use std::collections::hash_map::DefaultHasher;
     use std::collections::HashMap;
     use std::hash::{Hash, Hasher};
-    let mut seen: HashMap<u64, Vec<usize>> = HashMap::new();
-    // First pass: group candidate indices by content hash (one hash per track,
-    // at scan time only — never per frame).
-    let mut hashes: Vec<Option<u64>> = Vec::with_capacity(tracks.len());
-    for track in tracks.iter() {
-        hashes.push(track.artwork.as_ref().map(|bytes| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            bytes.len().hash(&mut hasher);
-            hasher.write(bytes);
-            hasher.finish()
-        }));
-    }
-    for (index, hash) in hashes.iter().enumerate() {
-        if let Some(hash) = hash {
-            seen.entry(*hash).or_default().push(index);
-        }
-    }
-    for indices in seen.into_values() {
-        if indices.len() < 2 {
+
+    let mut buckets: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (index, track) in tracks.iter().enumerate() {
+        let Some(bytes) = &track.artwork else {
             continue;
-        }
-        // Confirm byte equality within a hash bucket before sharing.
-        let mut groups: Vec<Vec<usize>> = Vec::new();
+        };
+        let mut hasher = DefaultHasher::new();
+        bytes.len().hash(&mut hasher);
+        hasher.write(bytes);
+        buckets.entry(hasher.finish()).or_default().push(index);
+    }
+
+    let mut groups: Vec<(Arc<[u8]>, Vec<usize>)> = Vec::new();
+    for indices in buckets.into_values() {
+        // Confirm byte equality inside a bucket before sharing one cover.
+        let first = groups.len();
         for index in indices {
-            let placed = groups.iter_mut().find(|group| {
-                tracks[index]
-                    .artwork
-                    .as_ref()
-                    .zip(tracks[group[0]].artwork.as_ref())
-                    .is_some_and(|(a, b)| std::sync::Arc::ptr_eq(a, b) || a.as_ref() == b.as_ref())
-            });
-            match placed {
-                Some(group) => group.push(index),
-                None => groups.push(vec![index]),
+            let Some(bytes) = &tracks[index].artwork else {
+                continue;
+            };
+            match groups[first..]
+                .iter_mut()
+                .find(|(known, _)| Arc::ptr_eq(known, bytes) || known.as_ref() == bytes.as_ref())
+            {
+                Some((_, members)) => members.push(index),
+                None => groups.push((bytes.clone(), vec![index])),
             }
         }
-        for group in groups {
-            if group.len() < 2 {
-                continue;
-            }
-            let (bytes, image) = (
-                tracks[group[0]].artwork.clone(),
-                tracks[group[0]].artwork_image.clone(),
-            );
-            for index in group.into_iter().skip(1) {
-                tracks[index].artwork = bytes.clone();
-                tracks[index].artwork_image = image.clone();
+    }
+    groups
+}
+
+/// Builds one cover per distinct artwork, across all cores, and shares each
+/// result with every track that carries it.
+fn attach_covers(tracks: &mut [Track]) {
+    let groups = artwork_groups(tracks);
+    if groups.is_empty() {
+        return;
+    }
+    let built = map_parallel(&groups, |(bytes, _)| build_cover(bytes));
+    for ((_, members), cover) in groups.iter().zip(built) {
+        for &index in members {
+            match &cover {
+                Some((image, hero)) => {
+                    tracks[index].artwork = Some(hero.clone());
+                    tracks[index].artwork_image = Some(image.clone());
+                }
+                // Undecodable artwork is dropped rather than carried around as
+                // bytes nothing can draw.
+                None => tracks[index].artwork = None,
             }
         }
     }
@@ -526,8 +695,12 @@ fn supported_extension(path: &Path) -> bool {
         })
 }
 
+/// Single-track read, used for freshly downloaded audio. The bulk scan defers
+/// cover building to `attach_covers` so albums decode once.
 fn read_track(path: &Path) -> Result<Track> {
-    read_track_with_added(path, None)
+    let mut track = read_track_with_added(path, None)?;
+    attach_covers(std::slice::from_mut(&mut track));
+    Ok(track)
 }
 
 fn read_track_with_added(path: &Path, added_hint: Option<std::time::SystemTime>) -> Result<Track> {
@@ -603,8 +776,6 @@ fn read_track_with_added(path: &Path, added_hint: Option<std::time::SystemTime>)
                 .or_else(|| tag.pictures().first())
         })
         .map(|picture| Arc::from(picture.data()));
-    let artwork_image = artwork.as_ref().map(artwork_image_from_bytes);
-
     let year = tag.and_then(|tag| tag.year()).filter(|year| *year > 0);
 
     let search_key = Track::build_search_key(&title, &artist, &album);
@@ -615,7 +786,7 @@ fn read_track_with_added(path: &Path, added_hint: Option<std::time::SystemTime>)
         album,
         duration,
         artwork,
-        artwork_image,
+        artwork_image: None,
         year,
         added: added_hint.or_else(|| file_added(path)),
         search_key,
@@ -1613,5 +1784,115 @@ mod tests {
         let res = scan_folders(&[temp1.0.clone(), temp2.0.clone(), temp1.0.clone()]);
         assert_eq!(res.tracks.len(), 2);
         assert!(res.errors.is_empty());
+    }
+
+    #[test]
+    fn parallel_work_keeps_input_order_and_runs_every_item_once() {
+        let items: Vec<usize> = (0..1_000).collect();
+        let visits: Vec<AtomicU64> = items.iter().map(|_| AtomicU64::new(0)).collect();
+
+        let squares = map_parallel(&items, |item| {
+            visits[*item].fetch_add(1, Ordering::Relaxed);
+            item * item
+        });
+
+        assert_eq!(squares.len(), items.len());
+        for (item, square) in items.iter().zip(&squares) {
+            assert_eq!(*square, item * item, "results came back out of order");
+        }
+        for (item, visits) in visits.iter().enumerate() {
+            assert_eq!(
+                visits.load(Ordering::Relaxed),
+                1,
+                "item {item} was not run exactly once"
+            );
+        }
+    }
+
+    /// A cover is drawn at 158px at the largest, so what is kept has to be
+    /// bounded regardless of what was embedded — the renderer holds every image
+    /// it draws for the life of the process.
+    #[test]
+    fn covers_are_scaled_down_and_shared_across_an_album() {
+        let embedded = encoded_artwork(900, 700);
+        let original = embedded.len();
+        let mut tracks: Vec<Track> = (0..4)
+            .map(|index| track_with_artwork(index, Some(embedded.clone())))
+            .collect();
+
+        attach_covers(&mut tracks);
+
+        for track in &tracks {
+            let cover = track.artwork_image.as_ref().expect("cover was built");
+            let size = cover.size(0);
+            assert_eq!(size.width.0, COVER_EDGE as i32);
+            let expected = (700.0 * f64::from(COVER_EDGE) / 900.0).round() as i32;
+            assert_eq!(size.height.0, expected, "aspect ratio was not preserved");
+            let kept = track.artwork.as_ref().expect("hero bytes were kept");
+            assert!(
+                kept.len() < original / 2,
+                "hero bytes were not re-encoded smaller: {} of {original}",
+                kept.len()
+            );
+            let hero = hero_image(kept).expect("hero decodes");
+            assert!(hero.size(0).width.0 <= HERO_EDGE as i32);
+        }
+
+        let first = tracks[0].artwork_image.as_ref().unwrap();
+        for track in &tracks[1..] {
+            assert!(
+                Arc::ptr_eq(first, track.artwork_image.as_ref().unwrap()),
+                "an album decoded its cover more than once"
+            );
+        }
+    }
+
+    #[test]
+    fn artwork_that_cannot_be_decoded_is_dropped() {
+        let mut tracks = vec![track_with_artwork(0, Some(Arc::from(vec![1u8, 2, 3, 4])))];
+
+        attach_covers(&mut tracks);
+
+        assert!(tracks[0].artwork.is_none());
+        assert!(tracks[0].artwork_image.is_none());
+    }
+
+    /// Noise rather than a gradient: real cover art is photographic, and a
+    /// smooth synthetic image compresses so well that re-encoding it would
+    /// legitimately grow it.
+    fn encoded_artwork(width: u32, height: u32) -> Arc<[u8]> {
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        let source = image::RgbaImage::from_fn(width, height, |_, _| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            let bytes = seed.to_le_bytes();
+            image::Rgba([bytes[0], bytes[1], bytes[2], u8::MAX])
+        });
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(
+                source.as_raw(),
+                width,
+                height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .unwrap();
+        Arc::from(bytes)
+    }
+
+    fn track_with_artwork(index: usize, artwork: Option<Arc<[u8]>>) -> Track {
+        Track {
+            path: PathBuf::from(format!("track{index}.mp3")),
+            title: format!("Track {index}"),
+            artist: "Artist".to_owned(),
+            album: "Album".to_owned(),
+            duration: Duration::from_secs(1),
+            artwork,
+            artwork_image: None,
+            year: None,
+            added: None,
+            search_key: Track::build_search_key("", "", ""),
+        }
     }
 }

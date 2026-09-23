@@ -13,7 +13,11 @@ use crate::views::ui::{
 };
 use crate::widgets::player_bar::{seek_bar, volume_icon};
 
-pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+pub fn render_player(
+    model: &mut NoirPlayerModel,
+    window: &mut Window,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Div {
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let is_playing = model.is_playing;
     let progress = model.progress();
@@ -26,9 +30,7 @@ pub fn render_player(model: &mut NoirPlayerModel, cx: &mut Context<NoirPlayerMod
             String::new(),
         ),
     };
-    let artwork = model
-        .now_playing()
-        .and_then(|track| track.artwork_image.clone());
+    let artwork = model.hero_cover(window, cx);
     let has_track = model.current.is_some();
     let meter = model.audio_meter();
 
@@ -704,7 +706,7 @@ fn action(id: &'static str, icon: MusicIcon, label: &'static str, is_light: bool
         .child(div().text_sm().child(label))
 }
 
-fn artwork_large(artwork: Option<std::sync::Arc<Image>>, is_playing: bool) -> Div {
+fn artwork_large(artwork: Option<std::sync::Arc<RenderImage>>, is_playing: bool) -> Div {
     let base = div()
         .size(px(276.0))
         .rounded_3xl()

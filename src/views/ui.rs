@@ -338,23 +338,10 @@ pub fn icon_text(kind: gpui_kit::assets::IconName, size: f32) -> Div {
         .child(icon(kind).size(px(size * 0.66)))
 }
 
-#[allow(dead_code)]
-pub fn img_from_bytes(bytes: std::sync::Arc<[u8]>) -> Img {
-    let format = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
-        ImageFormat::Png
-    } else {
-        ImageFormat::Jpeg
-    };
-    img(std::sync::Arc::new(Image::from_bytes(
-        format,
-        bytes.to_vec(),
-    )))
-}
-
-/// Renders a scan-time cached cover with no copy and no hash. Prefer this
-/// over `img_from_bytes` everywhere; the latter copies and hashes the whole
-/// JPEG on every call (i.e. every row, every frame).
-pub fn img_from_image(image: std::sync::Arc<Image>) -> Img {
+/// Renders a cover that was decoded and scaled at scan time. Passing an
+/// already-decoded image keeps its memory ours: an encoded `Image` goes into a
+/// renderer cache that is never evicted.
+pub fn img_from_image(image: std::sync::Arc<RenderImage>) -> Img {
     img(image)
 }
 

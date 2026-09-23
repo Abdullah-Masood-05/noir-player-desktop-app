@@ -4,6 +4,41 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.1.1]
+
+### Performance: Artwork Memory and Scan Speed
+
+Version 2.1.1 fixes memory that grew as you played and never came back
+down, and puts library scanning on every core. No part of the interface
+changes.
+
+### Highlights & New Features
+
+- **Artwork No Longer Accumulates**: Memory grew by roughly a megabyte for
+  every song played whose cover had not been shown before, and stayed there.
+  Cover art was handed to the renderer still encoded, which decodes it into
+  a cache that is never emptied — so every cover ever drawn stayed in memory
+  uncompressed, at whatever size it happened to be embedded at. Nothing in
+  the interface draws a cover larger than the 276px now-playing artwork, so
+  none of that size was ever used. Covers are now decoded and scaled once
+  when the library is scanned, and the large one behind Now Playing is built
+  a single track at a time and released when the song changes. An 84-track
+  library that could reach 33MB of artwork now holds 3MB and stays there.
+- **Scanning Uses Every Core**: Reading tags and preparing covers is
+  per-file work that ran on one thread. It now runs on all of them, taking
+  work from a shared queue so one large file cannot hold up the rest.
+  Scanning an 84-track library went from 5.6 seconds to 1.2 on sixteen
+  cores. Covers are prepared once per album rather than once per track.
+
+### Fixes
+
+- A rescan left the graphics memory for the previous library's covers
+  allocated. Those are now released once the new library is in place.
+- Cover art small enough to already fit was re-encoded larger than it
+  arrived. The smaller of the two is now kept.
+- Cover art with transparency is no longer flattened onto black, and cover
+  art carrying an orientation tag is no longer drawn on its side.
+
 ## [2.1.0]
 
 ### Performance: Large Libraries and Idle CPU

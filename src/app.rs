@@ -182,6 +182,10 @@ impl Drop for DiscoverAudioJob {
     }
 }
 
+/// How long the volume readout stays up after the last change, and so also how
+/// long the volume waits to be written.
+const VOLUME_HUD_DURATION: Duration = Duration::from_millis(1500);
+
 pub struct NoirPlayerModel {
     pub active_tab: ActiveTab,
     pub library_tab: LibraryTab,
@@ -252,6 +256,10 @@ pub struct NoirPlayerModel {
     pub settings_search: Entity<InputState>,
     pub settings_selected_index: usize,
     pub volume_hud_until: Option<std::time::Instant>,
+    /// Whether a task is already waiting for the volume to stop changing. A
+    /// held arrow key arrives at the key-repeat rate, and every one of those
+    /// used to spawn its own timer and write the whole store to disk.
+    volume_settling: bool,
     pub update_status: crate::update::UpdateStatus,
     pub update_dialog_open: bool,
     pub latest_release: Option<crate::update::ReleaseInfo>,
@@ -331,6 +339,7 @@ impl NoirPlayerModel {
             scanning: false,
             volume,
             volume_hud_until: None,
+            volume_settling: false,
             shuffle: false,
             repeat_all: true,
             discover_search,
@@ -1399,16 +1408,44 @@ impl NoirPlayerModel {
         if let Some(player) = self.player.as_ref() {
             player.set_volume(volume);
         }
-        self.volume_hud_until = Some(std::time::Instant::now() + Duration::from_millis(1500));
-        self.save_current_store(cx);
+        self.volume_hud_until = Some(std::time::Instant::now() + VOLUME_HUD_DURATION);
+        self.settle_volume(cx);
+        cx.notify();
+    }
+
+    /// Hides the volume readout and saves the new volume once the changes stop,
+    /// with one waiter and one write per gesture however many steps it took.
+    fn settle_volume(&mut self, cx: &mut Context<Self>) {
+        if self.volume_settling {
+            return;
+        }
+        self.volume_settling = true;
         cx.spawn(async move |this, cx| {
-            smol::Timer::after(Duration::from_millis(1550)).await;
-            let _ = this.update(cx, |_, cx| {
+            loop {
+                let remaining = this
+                    .update(cx, |this, _| {
+                        this.volume_hud_until
+                            .map(|until| until.saturating_duration_since(std::time::Instant::now()))
+                    })
+                    .ok()
+                    .flatten();
+                match remaining {
+                    // The deadline moved while waiting, so the volume is still
+                    // being turned; wait out the rest of it instead of writing
+                    // a value that is about to change again.
+                    Some(remaining) if !remaining.is_zero() => {
+                        smol::Timer::after(remaining.max(Duration::from_millis(16))).await;
+                    }
+                    _ => break,
+                }
+            }
+            let _ = this.update(cx, |this, cx| {
+                this.volume_settling = false;
+                this.save_current_store(cx);
                 cx.notify();
             });
         })
         .detach();
-        cx.notify();
     }
 
     pub fn adjust_volume(&mut self, delta: f32, cx: &mut Context<Self>) {

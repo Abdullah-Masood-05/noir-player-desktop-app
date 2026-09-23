@@ -7,3 +7,4 @@ shot*.png
 dist/
 dist-*/
 ci-installers/
+.claude/

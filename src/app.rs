@@ -196,6 +196,11 @@ pub struct NoirPlayerModel {
     /// O(1) favourite lookup for the song list. Rebuilt whenever the store
     /// is replaced; the serialized `Vec` stays the source of truth.
     favourites_set: std::collections::HashSet<PathBuf>,
+    /// Covers belonging to a library that has been replaced, waiting for a frame
+    /// to release their renderer textures on. Those outlive the images
+    /// themselves and only go away when the window is told, and the library is
+    /// replaced from a background task that has no window to tell.
+    retired_covers: Vec<std::sync::Arc<RenderImage>>,
     /// The now-playing cover at hero resolution, and the track it belongs to.
     /// Exactly one is kept: the renderer holds every image it has drawn until it
     /// is told to drop it, so caching one per track would grow resident memory
@@ -313,6 +318,7 @@ impl NoirPlayerModel {
             artists: Vec::new(),
             store,
             favourites_set,
+            retired_covers: Vec::new(),
             hero_cover: None,
             store_path,
             storage_error,
@@ -775,6 +781,7 @@ impl NoirPlayerModel {
         errors: &[String],
         cx: &mut Context<Self>,
     ) {
+        self.retire_covers();
         for track in self
             .discover_cached
             .iter()
@@ -1878,6 +1885,31 @@ impl NoirPlayerModel {
         Some(image)
     }
 
+    /// Queues the covers of the library being replaced for texture release. A
+    /// rescan builds fresh images for the same albums, so without this every
+    /// rescan would strand a library's worth of textures. A cover the new
+    /// library still shares is simply re-uploaded on the next frame.
+    fn retire_covers(&mut self) {
+        for track in &self.tracks {
+            let Some(cover) = &track.artwork_image else {
+                continue;
+            };
+            if !self
+                .retired_covers
+                .iter()
+                .any(|queued| std::sync::Arc::ptr_eq(queued, cover))
+            {
+                self.retired_covers.push(cover.clone());
+            }
+        }
+    }
+
+    fn release_retired_covers(&mut self, window: &mut Window) {
+        for cover in self.retired_covers.drain(..) {
+            let _ = window.drop_image(cover);
+        }
+    }
+
     fn release_hero_cover(&mut self, window: &mut Window, _cx: &mut Context<Self>) {
         if let Some((_, image)) = self.hero_cover.take() {
             // Dropping the `Arc` frees the pixels, but the renderer's texture
@@ -1889,6 +1921,7 @@ impl NoirPlayerModel {
 
 impl Render for NoirPlayerModel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.release_retired_covers(window);
         let active_tab = self.active_tab;
         let dialog_layer = Root::render_dialog_layer(window, cx);
 

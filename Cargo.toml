@@ -20,6 +20,7 @@ sha2 = "0.10"
 dotenvy = "0.15"
 urlencoding = "2"
 walkdir = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 lofty = "0.22"
 rodio = { version = "0.21", features = ["symphonia-alac", "symphonia-aiff"] }
 dirs = "6"
@@ -44,9 +45,6 @@ required-features = ["installer"]
 [build-dependencies]
 winresource = "0.1"
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }
 
 [package.metadata.bundle]
 name = "Noir Player"

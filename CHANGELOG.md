@@ -4,6 +4,15 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.1.2]
+
+### Fixes
+
+- **Single Instance**: Opening the app from a shortcut while it was already
+  running used to open a second window onto the same library, fighting the
+  first one for the audio device. The running instance is now brought to
+  the foreground instead, and restored if it was minimized.
+
 ## [2.1.1]
 
 ### Performance: Artwork Memory and Scan Speed

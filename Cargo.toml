@@ -25,6 +25,7 @@ lofty = "0.22"
 rodio = { version = "0.21", features = ["symphonia-alac", "symphonia-aiff"] }
 dirs = "6"
 smol = "2"
+interprocess = { version = "2.4.4", default-features = false }
 
 [features]
 installer = ["dep:tauri-bundler", "dep:tauri-utils"]

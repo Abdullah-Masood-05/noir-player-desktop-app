@@ -4,6 +4,7 @@ mod api;
 mod app;
 mod config;
 mod media;
+mod single_instance;
 pub mod update;
 mod views;
 mod widgets;
@@ -38,6 +39,15 @@ fn native_window_options(cx: &App) -> WindowOptions {
 }
 
 fn main() {
+    // A shortcut, taskbar pin or `.desktop` file just runs the executable
+    // again; ask any instance already running to come forward instead of
+    // opening a second window onto the same library and the same audio
+    // device.
+    if single_instance::activate_existing() {
+        return;
+    }
+    let activation = single_instance::listen_for_activation();
+
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
@@ -51,11 +61,18 @@ fn main() {
 
             let options = native_window_options(cx);
             cx.spawn(async move |cx| {
-                cx.open_window(options, |window, cx| {
-                    let view = cx.new(|cx| app::NoirPlayerModel::new(window, cx));
-                    cx.new(|cx| Root::new(view, window, cx))
-                })
-                .expect("Failed to open window");
+                let window = cx
+                    .open_window(options, |window, cx| {
+                        let view = cx.new(|cx| app::NoirPlayerModel::new(window, cx));
+                        cx.new(|cx| Root::new(view, window, cx))
+                    })
+                    .expect("Failed to open window");
+
+                if let Some(activation) = activation {
+                    while activation.recv().await.is_ok() {
+                        let _ = window.update(cx, |_, window, _| window.activate_window());
+                    }
+                }
             })
             .detach();
         });

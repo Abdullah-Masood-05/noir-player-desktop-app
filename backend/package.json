@@ -1,0 +1,13 @@
+{
+  "name": "noir-player-api",
+  "private": true,
+  "description": "Discover API for Noir Player.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^5"
+  }
+}

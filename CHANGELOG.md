@@ -12,6 +12,9 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
   running used to open a second window onto the same library, fighting the
   first one for the audio device. The running instance is now brought to
   the foreground instead, and restored if it was minimized.
+- **Update Notifier**: Fixed release highlights box collapsing to zero height
+  in the update modal and improved release notes formatting.
+- **Windows CI Tests**: Fixed flaky installer preference test on Windows runners.
 
 ## [2.1.1]
 

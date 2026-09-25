@@ -149,9 +149,9 @@ pub fn render_update_modal(
                                     .child("Release Highlights:"),
                             )
                             .child(
-                                div()
+                                v_flex()
                                     .w_full()
-                                    .max_h(px(170.0))
+                                    .h(px(160.0))
                                     .rounded_xl()
                                     .bg(dynamic_inner_surface(is_light))
                                     .border(px(1.0))
@@ -160,8 +160,9 @@ pub fn render_update_modal(
                                     .overflow_hidden()
                                     .child(smooth_scroll(
                                         "update-notes-scroll",
-                                        div()
+                                        v_flex()
                                             .w_full()
+                                            .gap(px(4.0))
                                             .text_xs()
                                             .line_height(relative(1.5))
                                             .text_color(if is_light {
@@ -489,33 +490,68 @@ fn modal_footer(
 }
 
 fn render_notes_content(notes: &str, is_light: bool) -> Vec<Div> {
-    if notes.trim().is_empty() {
+    let stripped = notes.trim();
+    if stripped.is_empty() {
         return vec![div()
             .text_color(if is_light { c(0x71717A) } else { white(0.5) })
-            .child("View release details on GitHub.")];
+            .child("No release notes available. View release details on GitHub.")];
     }
 
-    notes
-        .lines()
-        .filter(|line| !line.trim().is_empty())
+    // Join continuation lines (indented lines following a bullet) into the
+    // bullet text so multi-line entries render as a single item.
+    let mut merged: Vec<String> = Vec::new();
+    for raw in stripped.lines() {
+        let line = raw.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+        let is_continuation = line.starts_with("  ") && !line.trim_start().starts_with('-')
+            && !line.trim_start().starts_with('*')
+            && !line.trim_start().starts_with('#');
+        if is_continuation {
+            if let Some(last) = merged.last_mut() {
+                last.push(' ');
+                last.push_str(line.trim());
+                continue;
+            }
+        }
+        merged.push(line.to_string());
+    }
+
+    // Strip markdown bold markers: **text** → text
+    let strip_bold = |s: &str| -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '*' && chars.peek() == Some(&'*') {
+                chars.next(); // skip second *
+            } else {
+                out.push(ch);
+            }
+        }
+        out
+    };
+
+    merged
+        .iter()
         .map(|line| {
             let line = line.trim();
             if line.starts_with("### ") || line.starts_with("## ") {
-                let text = line.trim_start_matches('#').trim().to_string();
+                let text = strip_bold(line.trim_start_matches('#').trim());
                 div()
                     .pt(px(4.0))
                     .font_weight(FontWeight::BOLD)
                     .text_color(if is_light { c(0x18181B) } else { white(0.95) })
                     .child(text)
             } else if line.starts_with("- ") || line.starts_with("* ") {
-                let text = line[2..].trim().to_string();
+                let text = strip_bold(line[2..].trim());
                 h_flex()
                     .gap(px(6.0))
                     .items_start()
                     .child(div().text_color(red()).child("\u{2022}"))
                     .child(div().flex_1().child(text))
             } else {
-                div().child(line.to_string())
+                div().child(strip_bold(line))
             }
         })
         .collect()

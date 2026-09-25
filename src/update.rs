@@ -785,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn platform_asset_prefers_this_platforms_installer() {
+    fn platform_asset_picks_an_installer_for_this_os() {
         let assets = vec![
             asset("noir-player-1.3.0-linux-x64.deb"),
             asset("noir-player-1.3.0-linux-x64.rpm"),
@@ -794,19 +794,48 @@ mod tests {
             asset("noir-player-1.3.0-windows-x64-setup.exe"),
             asset("SHA256SUMS"),
         ];
-        let picked = platform_asset(&assets).expect("an asset for this platform");
-        let expected_suffix = if cfg!(target_os = "windows") {
-            "-setup.exe"
-        } else if cfg!(target_os = "macos") {
-            ".dmg"
-        } else {
-            "."
-        };
-        assert!(
-            picked.name.contains(expected_suffix),
-            "picked {} on this platform",
-            picked.name
-        );
+
+        // On Windows the free function `platform_asset` delegates to
+        // `install_scope()` which is filesystem-dependent and flaky in CI.
+        // Test the underlying `windows_asset` with explicit scopes instead.
+        #[cfg(target_os = "windows")]
+        {
+            let per_user = windows_asset(&assets, InstallScope::PerUser)
+                .expect("per-user asset");
+            assert!(
+                per_user.name.ends_with("-setup.exe"),
+                "PerUser should prefer -setup.exe, got {}",
+                per_user.name
+            );
+
+            let per_machine = windows_asset(&assets, InstallScope::PerMachine)
+                .expect("per-machine asset");
+            assert!(
+                per_machine.name.ends_with(".msi"),
+                "PerMachine should prefer .msi, got {}",
+                per_machine.name
+            );
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let picked = platform_asset(&assets).expect("macOS asset");
+            assert!(
+                picked.name.ends_with(".dmg"),
+                "macOS should pick .dmg, got {}",
+                picked.name
+            );
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let picked = platform_asset(&assets).expect("Linux asset");
+            assert!(
+                picked.name.ends_with(".deb") || picked.name.ends_with(".rpm"),
+                "Linux should pick .deb or .rpm, got {}",
+                picked.name
+            );
+        }
     }
 
     #[test]

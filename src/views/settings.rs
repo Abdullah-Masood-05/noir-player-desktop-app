@@ -21,6 +21,7 @@ pub enum SettingsCategory {
     Equalizer,
     Appearance,
     Library,
+    Discover,
     About,
 }
 
@@ -32,6 +33,7 @@ impl SettingsCategory {
             Self::Equalizer => "Equalizer",
             Self::Appearance => "Appearance",
             Self::Library => "Library & Folders",
+            Self::Discover => "Discover",
             Self::About => "About",
         }
     }
@@ -209,12 +211,13 @@ fn category_chips(
     cx: &mut Context<NoirPlayerModel>,
 ) -> Div {
     let current = model.settings_category;
-    const CATS: [SettingsCategory; 6] = [
+    const CATS: [SettingsCategory; 7] = [
         SettingsCategory::All,
         SettingsCategory::Playback,
         SettingsCategory::Equalizer,
         SettingsCategory::Appearance,
         SettingsCategory::Library,
+        SettingsCategory::Discover,
         SettingsCategory::About,
     ];
 
@@ -747,6 +750,61 @@ fn build_rows(
                 .into_any_element(),
         );
         idx += 1;
+    }
+
+    // ── Discover rows ───────────────────────────────────────────────────────────
+    let dc_visible = cat == SettingsCategory::All || cat == SettingsCategory::Discover;
+    let dc_match = query.is_empty()
+        || "discover api key keys own lastfm last.fm youtube rapidapi server quota".contains(query);
+
+    if dc_visible && dc_match {
+        let active = idx == selected;
+        rows.push(
+            row_base(idx, active, is_light, cx)
+                .child(label_cell(
+                    "Your Own API Keys",
+                    "Optional. Discover works without these through Noir Player's server. \
+                     A key you add here calls that service directly, on your own quota.",
+                    is_light,
+                ))
+                .into_any_element(),
+        );
+        idx += 1;
+
+        let fields = [
+            (
+                model.lastfm_key_input.clone(),
+                "Last.fm API Key",
+                "Trending and search. Free at last.fm/api.",
+            ),
+            (
+                model.youtube_key_input.clone(),
+                "YouTube Data API Key",
+                "Finds each song's video. From the Google Cloud console.",
+            ),
+            (
+                model.rapidapi_key_input.clone(),
+                "RapidAPI Key",
+                "Converts the video to audio, via YouTube MP3 on RapidAPI.",
+            ),
+        ];
+        for (input, title, subtitle) in fields {
+            let active = idx == selected;
+            rows.push(
+                row_base(idx, active, is_light, cx)
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(label_cell(title, subtitle, is_light))
+                    .child(
+                        div()
+                            .w(px(280.0))
+                            .flex_shrink_0()
+                            .child(Input::new(&input).mask_toggle().cleanable(true)),
+                    )
+                    .into_any_element(),
+            );
+            idx += 1;
+        }
     }
 
     // ── About rows ──────────────────────────────────────────────────────────────

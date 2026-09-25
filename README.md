@@ -66,21 +66,51 @@ Switch themes inside **Settings** (`Ctrl+,`), which also manages library scan fo
 
 ## Discover and API configuration
 
-Local playback does not need API keys. Discover uses these runtime environment variables:
+Local playback does not need API keys, and neither does Discover. Discover
+calls three services, and by default it reaches all of them through Noir
+Player's backend at `https://noir-player-api.vercel.app`, which holds the keys.
 
-| Variable | Used for |
-| --- | --- |
-| `LASTFM_API_KEY` | Last.fm top tracks and track search, with up to 30 results per request |
-| `YOUTUBE_API_KEY` | YouTube Data API v3 search for the first video matching title and artist |
-| `RAPIDAPI_KEY` | The `youtube-mp36.p.rapidapi.com` audio-resolution service |
+| Service | Used for | Backend endpoint |
+| --- | --- | --- |
+| Last.fm | Top tracks and track search, up to 30 results | `/api/tracks`, `/api/tracks?q=` |
+| YouTube Data API v3 | The first video matching a song's title and artist | `/api/video?q=` |
+| RapidAPI `youtube-mp36` | A download link for that video's audio | `/api/resolve?id=` |
 
-Supply your own keys. Enable YouTube Data API v3 for the Google Cloud project and ensure the RapidAPI account has access to this specific service. A generic RapidAPI key without the required subscription may not work. There is no built-in shared key, login flow or settings editor.
+The audio itself is always downloaded straight from the link the service
+returns; it never passes through the backend.
 
-`src/config.rs` calls `dotenvy::dotenv()` on first API access. It searches for `.env` in the process working directory and its parents. Existing environment variables take precedence. It does not read a dedicated configuration file under AppData, Application Support or XDG config directories, and does not look next to the executable unless that is the working directory. Restart after changing keys.
+**Using your own keys.** Settings → Discover takes a key for each service. Any
+service you give a key is called directly, on your own quota; the rest still go
+through the backend. Keys are stored with the app's other settings. For YouTube,
+enable YouTube Data API v3 on the Google Cloud project; for RapidAPI, the
+account needs a subscription to the `youtube-mp36` service specifically.
 
-For development, copy `.env.example` to `.env` in the repository root and fill in only the keys you need. For an installed build, set variables in the launching process or launch from a private directory containing `.env`. Desktop launchers may use a different working directory and environment than a terminal.
+For development, `LASTFM_API_KEY`, `YOUTUBE_API_KEY` and `RAPIDAPI_KEY` in the
+environment, or in a `.env` found from the working directory (see
+`.env.example`), fill in any key left empty in Settings. `NOIR_API_BASE` points
+the app at another HTTPS deployment of the backend.
 
-Do not commit `.env`, attach it to bug reports, put keys in Cargo metadata, or add them as build secrets. Before copying the template, ensure `.env` is excluded from version control. The workflows reject a tracked root `.env` without reading it. Release archives contain no environment file.
+**The backend** lives in `backend/` and deploys to Vercel. Its keys are
+environment variables on the Vercel project, stored as secrets:
+
+```sh
+cd backend
+bun install
+vercel env add LASTFM_API_KEY production --sensitive
+vercel env add YOUTUBE_API_KEY production --sensitive
+vercel env add RAPIDAPI_KEY production --sensitive
+vercel deploy --prod
+```
+
+`/api/health` reports which keys a deployment has, without calling any
+service. The endpoints accept only what the app sends, so the keys can't be
+spent on arbitrary requests through them. Anyone can still call the endpoints
+the way the app does, so the keys' quotas are shared by everyone using a
+release. YouTube searches are cached for a day because each costs 100 of the
+10,000 quota units a key gets daily.
+
+Do not commit `.env`, attach it to bug reports or put keys in Cargo metadata.
+The workflows reject a tracked root `.env` without reading it.
 
 Discover Play downloads and validates the complete audio file into a local cache before playback. It is not streaming. Download saves audio to the configured download folder (defaults to the system Music folder, or customizable in Settings) and writes the discovered title and artist into its tags. A prepared cached copy can be reused. The first YouTube result can be the wrong recording; neither matching nor service availability is guaranteed. Only download audio you are permitted to download and follow the providers' terms.
 

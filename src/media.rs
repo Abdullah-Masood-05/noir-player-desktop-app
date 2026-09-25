@@ -393,6 +393,7 @@ fn validate_prepared_audio(path: &Path, cancel: &std::sync::atomic::AtomicBool) 
 
 pub fn prepare_discover_audio(
     source: &crate::api::Track,
+    keys: &crate::config::ApiKeys,
     download: bool,
     cached: Option<&Path>,
     download_folder: Option<&Path>,
@@ -474,8 +475,8 @@ pub fn prepare_discover_audio(
             bail!("Prepared audio changed while copying.");
         }
     } else {
-        let url = crate::api::resolve_audio(source, cancel, progress)?;
-        crate::api::download_audio(&url, &mut file, cancel, progress)?;
+        let url = crate::api::resolve_audio(source, keys, cancel, progress)?;
+        crate::api::download_audio(&url, keys, &mut file, cancel, progress)?;
     }
     file.sync_all()
         .map_err(|_| anyhow!("Could not flush the temporary audio file."))?;

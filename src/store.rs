@@ -38,6 +38,14 @@ pub struct Store {
     pub volume: f32,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
+    /// Discover keys entered in Settings. Empty means that service goes
+    /// through Noir Player's backend rather than being called directly.
+    #[serde(default)]
+    pub lastfm_api_key: String,
+    #[serde(default)]
+    pub youtube_api_key: String,
+    #[serde(default)]
+    pub rapidapi_key: String,
 }
 
 fn default_seek_interval() -> u32 {
@@ -85,6 +93,9 @@ impl Default for Store {
             resume_last_song: true,
             volume: 0.9,
             auto_check_updates: true,
+            lastfm_api_key: String::new(),
+            youtube_api_key: String::new(),
+            rapidapi_key: String::new(),
         }
     }
 }
@@ -462,5 +473,25 @@ mod tests {
             loaded.is_ok(),
             "Unknown fields should be tolerated for schema evolution"
         );
+    }
+
+    #[test]
+    fn discover_keys_default_to_empty_and_survive_a_save() {
+        // A settings file from before keys could be entered in the app.
+        let older: Store = serde_json::from_str(r#"{"playlists":[],"favourites":[]}"#).unwrap();
+        assert!(older.lastfm_api_key.is_empty());
+        assert!(older.youtube_api_key.is_empty());
+        assert!(older.rapidapi_key.is_empty());
+
+        let temp = TempDir::new();
+        let path = temp.0.join("keys.json");
+        let saved = Store {
+            lastfm_api_key: "lastfm-key".into(),
+            youtube_api_key: "youtube-key".into(),
+            rapidapi_key: "rapidapi-key".into(),
+            ..Store::default()
+        };
+        saved.save(&path).unwrap();
+        assert_eq!(Store::load(&path).unwrap(), saved);
     }
 }

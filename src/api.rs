@@ -4,6 +4,8 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::config::ApiKeys;
+
 #[derive(Debug, Clone)]
 pub struct Track {
     pub name: String,
@@ -11,22 +13,38 @@ pub struct Track {
     pub url: Option<String>,
 }
 
-pub fn fetch_trending() -> Result<Vec<Track>> {
-    request("chart.gettoptracks", None)
+pub fn fetch_trending(keys: &ApiKeys) -> Result<Vec<Track>> {
+    request(keys, None)
 }
 
-pub fn search_tracks(query: &str) -> Result<Vec<Track>> {
+pub fn search_tracks(keys: &ApiKeys, query: &str) -> Result<Vec<Track>> {
     if query.trim().is_empty() {
-        return fetch_trending();
+        return fetch_trending(keys);
     }
-    request("track.search", Some(query.trim()))
+    request(keys, Some(query.trim()))
 }
 
-fn request(method: &str, query: Option<&str>) -> Result<Vec<Track>> {
-    let key = &crate::config::CONFIG.lastfm_api_key;
-    if key.trim().is_empty() {
-        bail!("Set LASTFM_API_KEY in your environment or .env to use Discover.");
-    }
+fn request(keys: &ApiKeys, query: Option<&str>) -> Result<Vec<Track>> {
+    let root = if keys.lastfm.is_empty() {
+        backend_json(
+            &match query {
+                Some(query) => format!("/api/tracks?q={}", urlencoding::encode(query)),
+                None => "/api/tracks".to_owned(),
+            },
+            Duration::from_secs(15),
+        )?
+    } else {
+        lastfm_direct(&keys.lastfm, query)?
+    };
+    parse_tracks(&root, query.is_some())
+}
+
+fn lastfm_direct(key: &str, query: Option<&str>) -> Result<Value> {
+    let method = if query.is_some() {
+        "track.search"
+    } else {
+        "chart.gettoptracks"
+    };
     let mut url = format!(
         "https://ws.audioscrobbler.com/2.0/?method={method}&api_key={}&format=json&limit=30",
         urlencoding::encode(key)
@@ -47,9 +65,7 @@ fn request(method: &str, query: Option<&str>) -> Result<Vec<Track>> {
         .limit(1_048_576)
         .read_to_string()
         .map_err(|_| anyhow!("Could not read the Last.fm response."))?;
-    let root: Value = serde_json::from_str(&body)
-        .map_err(|_| anyhow!("Last.fm returned an invalid response."))?;
-    parse_tracks(&root, query.is_some())
+    serde_json::from_str(&body).map_err(|_| anyhow!("Last.fm returned an invalid response."))
 }
 
 fn parse_tracks(root: &Value, search: bool) -> Result<Vec<Track>> {
@@ -108,6 +124,42 @@ fn network_agent(timeout: Duration) -> ureq::Agent {
         .timeout_recv_body(Some(Duration::from_secs(20)))
         .build()
         .into()
+}
+
+/// GETs one of Noir Player's backend endpoints. Its errors are written for
+/// the person using the app, so they are shown as they come.
+fn backend_json(path: &str, timeout: Duration) -> Result<Value> {
+    let url = format!("{}{path}", crate::config::backend());
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .https_only(true)
+        .max_redirects(0)
+        // The backend explains a failure in the body; read it instead of
+        // replacing it with a generic transport error.
+        .http_status_as_error(false)
+        .timeout_global(Some(timeout))
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .build()
+        .into();
+    let mut response = agent.get(&url).call().map_err(|_| {
+        anyhow!("Couldn't reach Noir Player's server. Check your connection and try again.")
+    })?;
+    let status = response.status().as_u16();
+    let body = response
+        .body_mut()
+        .with_config()
+        .limit(1_048_576)
+        .read_to_string()
+        .map_err(|_| anyhow!("Couldn't read the answer from Noir Player's server."))?;
+    let root: Value = serde_json::from_str(&body)
+        .map_err(|_| anyhow!("Noir Player's server sent back something unexpected."))?;
+    if status != 200 {
+        let message = root
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("Noir Player's server couldn't handle that. Try again later.");
+        bail!("{message}");
+    }
+    Ok(root)
 }
 
 fn read_json(mut response: ureq::http::Response<ureq::Body>) -> Result<Value> {
@@ -208,16 +260,12 @@ fn validate_audio_url(url: &str) -> Result<ureq::http::Uri> {
     Ok(uri)
 }
 
-fn reject_credentials_in_url(url: &str) -> Result<()> {
+fn reject_credentials_in_url(url: &str, keys: &ApiKeys) -> Result<()> {
     let decoded = urlencoding::decode(url).map_err(|_| anyhow!("Invalid audio URL encoding."))?;
-    let config = &crate::config::CONFIG;
-    if [
-        &config.youtube_api_key,
-        &config.rapidapi_key,
-        &config.lastfm_api_key,
-    ]
-    .iter()
-    .any(|key| !key.is_empty() && (url.contains(key.as_str()) || decoded.contains(key.as_str())))
+    if keys
+        .all()
+        .iter()
+        .any(|key| !key.is_empty() && (url.contains(key) || decoded.contains(key)))
     {
         bail!("Audio service returned a URL containing API credentials.");
     }
@@ -226,41 +274,51 @@ fn reject_credentials_in_url(url: &str) -> Result<()> {
 
 pub fn resolve_audio(
     track: &Track,
+    keys: &ApiKeys,
     cancel: &AtomicBool,
     progress: &impl Fn(&str),
 ) -> Result<String> {
     check_cancel(cancel)?;
-    let config = &crate::config::CONFIG;
-    if config.youtube_api_key.trim().is_empty() || config.rapidapi_key.trim().is_empty() {
-        bail!("Configure YOUTUBE_API_KEY and RAPIDAPI_KEY to play or download Discover tracks.");
-    }
     progress("Finding audio on YouTube...");
     let query = format!("{} {}", track.name, track.artist);
-    let url = format!(
-        "https://www.googleapis.com/youtube/v3/search?part=snippet&q={}&type=video&maxResults=1&key={}",
-        urlencoding::encode(&query), urlencoding::encode(&config.youtube_api_key)
-    );
     let agent = network_agent(Duration::from_secs(20));
-    let response = agent
-        .get(&url)
-        .call()
-        .map_err(|_| anyhow!("YouTube search failed. Check your connection, API key or quota."))?;
-    let id = parse_video_id(&read_json(response)?)?;
-    let url = format!("https://youtube-mp36.p.rapidapi.com/dl?id={id}");
+    let found = if keys.youtube.is_empty() {
+        backend_json(
+            &format!("/api/video?q={}", urlencoding::encode(&query)),
+            Duration::from_secs(25),
+        )?
+    } else {
+        let url = format!(
+            "https://www.googleapis.com/youtube/v3/search?part=snippet&q={}&type=video&maxResults=1&key={}",
+            urlencoding::encode(&query), urlencoding::encode(&keys.youtube)
+        );
+        let response = agent.get(&url).call().map_err(|_| {
+            anyhow!("YouTube search failed. Check your connection, API key or quota.")
+        })?;
+        read_json(response)?
+    };
+    let id = parse_video_id(&found)?;
     for attempt in 0..4 {
         check_cancel(cancel)?;
         progress(&format!("Resolving audio ({}/4)...", attempt + 1));
-        let response = agent
-            .get(&url)
-            .header("X-RapidAPI-Key", &config.rapidapi_key)
-            .header("X-RapidAPI-Host", "youtube-mp36.p.rapidapi.com")
-            .call()
-            .map_err(|_| {
-                anyhow!("Audio resolution failed. Check your connection, RapidAPI key or quota.")
-            })?;
-        match parse_resolution(&read_json(response)?)? {
+        let answer = if keys.rapidapi.is_empty() {
+            backend_json(&format!("/api/resolve?id={id}"), Duration::from_secs(30))?
+        } else {
+            let response = agent
+                .get(&format!("https://youtube-mp36.p.rapidapi.com/dl?id={id}"))
+                .header("X-RapidAPI-Key", &keys.rapidapi)
+                .header("X-RapidAPI-Host", "youtube-mp36.p.rapidapi.com")
+                .call()
+                .map_err(|_| {
+                    anyhow!(
+                        "Audio resolution failed. Check your connection, RapidAPI key or quota."
+                    )
+                })?;
+            read_json(response)?
+        };
+        match parse_resolution(&answer)? {
             Resolution::Ready(url) => {
-                reject_credentials_in_url(&url)?;
+                reject_credentials_in_url(&url, keys)?;
                 check_cancel(cancel)?;
                 return Ok(url);
             }
@@ -281,6 +339,7 @@ pub fn resolve_audio(
 
 pub fn download_audio(
     url: &str,
+    keys: &ApiKeys,
     file: &mut std::fs::File,
     cancel: &AtomicBool,
     progress: &impl Fn(&str),
@@ -291,7 +350,7 @@ pub fn download_audio(
     for redirect in 0..=5 {
         check_cancel(cancel)?;
         let uri = validate_audio_url(&url)?;
-        reject_credentials_in_url(&url)?;
+        reject_credentials_in_url(&url, keys)?;
         let remaining = Duration::from_secs(180)
             .checked_sub(started.elapsed())
             .filter(|remaining| !remaining.is_zero())
@@ -485,6 +544,28 @@ mod tests {
         );
         assert!(parse_tracks(&json!({"error":6}), true).is_err());
         assert!(parse_tracks(&json!({}), false).is_err());
+    }
+
+    /// Drives the app's own request code against the deployed backend with
+    /// no keys of its own, as it runs for anyone who hasn't entered any. Makes one Last.fm request and
+    /// one YouTube search, so it is opt-in:
+    /// `cargo test -- --ignored live_backend`.
+    #[test]
+    #[ignore = "calls the deployed backend and spends service quota"]
+    fn live_backend_serves_discover_without_any_keys() {
+        let keys = ApiKeys::default();
+        let trending = fetch_trending(&keys).expect("trending through the backend");
+        assert!(!trending.is_empty());
+        let found = search_tracks(&keys, "Numb Linkin Park").expect("search through the backend");
+        assert!(found
+            .iter()
+            .any(|track| track.name.eq_ignore_ascii_case("numb")));
+        let video = backend_json("/api/video?q=Linkin%20Park%20Numb", Duration::from_secs(25))
+            .expect("video through the backend");
+        parse_video_id(&video).expect("a video id");
+        let refused = backend_json("/api/resolve?id=nope", Duration::from_secs(15))
+            .expect_err("a malformed id is refused");
+        assert!(!refused.to_string().is_empty());
     }
 
     #[test]

@@ -2,12 +2,6 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=Noir_Player_Logo.png");
 
-    // Discover keys are read with option_env!, so a changed key has to force a
-    // rebuild; cargo would otherwise reuse a binary carrying the old one.
-    for key in ["LASTFM_API_KEY", "YOUTUBE_API_KEY", "RAPIDAPI_KEY"] {
-        println!("cargo:rerun-if-env-changed={key}");
-    }
-
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let png = std::path::Path::new("Noir_Player_Logo.png");
         let ico_path = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("noir.ico");

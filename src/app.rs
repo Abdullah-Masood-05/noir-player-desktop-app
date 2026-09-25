@@ -186,6 +186,14 @@ impl Drop for DiscoverAudioJob {
 /// long the volume waits to be written.
 const VOLUME_HUD_DURATION: Duration = Duration::from_millis(1500);
 
+/// Which Discover service a key in Settings belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiKeyField {
+    LastFm,
+    YouTube,
+    RapidApi,
+}
+
 pub struct NoirPlayerModel {
     pub active_tab: ActiveTab,
     pub library_tab: LibraryTab,
@@ -254,6 +262,14 @@ pub struct NoirPlayerModel {
     pub equalizer_focus_handle: FocusHandle,
     pub settings_category: crate::views::settings::SettingsCategory,
     pub settings_search: Entity<InputState>,
+    /// The Discover key inputs in Settings. Empty means that service goes
+    /// through Noir Player's backend.
+    pub lastfm_key_input: Entity<InputState>,
+    pub youtube_key_input: Entity<InputState>,
+    pub rapidapi_key_input: Entity<InputState>,
+    /// A key has been edited but not written yet. Keys are written once the
+    /// field is left rather than on every keystroke.
+    api_keys_dirty: bool,
     pub settings_selected_index: usize,
     pub volume_hud_until: Option<std::time::Instant>,
     /// Whether a task is already waiting for the volume to stop changing. A
@@ -291,7 +307,22 @@ impl NoirPlayerModel {
             cx.new(|cx| InputState::new(window, cx).placeholder("Search tracks (Enter)"));
         let settings_search =
             cx.new(|cx| InputState::new(window, cx).placeholder("Select an option..."));
+        let lastfm_key_input = Self::api_key_input(&store.lastfm_api_key, window, cx);
+        let youtube_key_input = Self::api_key_input(&store.youtube_api_key, window, cx);
+        let rapidapi_key_input = Self::api_key_input(&store.rapidapi_key, window, cx);
         let subscriptions = vec![
+            cx.subscribe(&lastfm_key_input, |this, input, event: &InputEvent, cx| {
+                this.api_key_event(ApiKeyField::LastFm, &input, event, cx)
+            }),
+            cx.subscribe(&youtube_key_input, |this, input, event: &InputEvent, cx| {
+                this.api_key_event(ApiKeyField::YouTube, &input, event, cx)
+            }),
+            cx.subscribe(
+                &rapidapi_key_input,
+                |this, input, event: &InputEvent, cx| {
+                    this.api_key_event(ApiKeyField::RapidApi, &input, event, cx)
+                },
+            ),
             cx.subscribe(&library_search, |_, _, _: &InputEvent, cx| cx.notify()),
             cx.subscribe(&discover_search, |this, input, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
@@ -371,6 +402,10 @@ impl NoirPlayerModel {
             equalizer_focus_handle: cx.focus_handle(),
             settings_category: crate::views::settings::SettingsCategory::All,
             settings_search,
+            lastfm_key_input,
+            youtube_key_input,
+            rapidapi_key_input,
+            api_keys_dirty: false,
             settings_selected_index: 0,
             update_status: crate::update::UpdateStatus::Idle,
             update_dialog_open: false,
@@ -403,14 +438,15 @@ impl NoirPlayerModel {
         self.discover_error = None;
         self.discover_tracks.clear();
         let query = query.trim().to_owned();
+        let keys = crate::config::ApiKeys::from_store(&self.store);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
                     if query.is_empty() {
-                        crate::api::fetch_trending()
+                        crate::api::fetch_trending(&keys)
                     } else {
-                        crate::api::search_tracks(&query)
+                        crate::api::search_tracks(&keys, &query)
                     }
                 })
                 .await;
@@ -688,12 +724,14 @@ impl NoirPlayerModel {
         } else {
             None
         };
+        let keys = crate::config::ApiKeys::from_store(&self.store);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
                     media::prepare_discover_audio(
                         &source,
+                        &keys,
                         download,
                         cached.as_deref(),
                         download_folder.as_deref(),
@@ -1261,7 +1299,65 @@ impl NoirPlayerModel {
 
     pub fn close_settings(&mut self, cx: &mut Context<Self>) {
         self.settings_open = false;
+        // Closing with Escape can leave a key field without it ever blurring.
+        self.save_api_keys(cx);
         cx.notify();
+    }
+
+    fn api_key_input(
+        saved: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<InputState> {
+        let saved = saved.to_owned();
+        cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Not set: using Noir Player's server")
+                .masked(true)
+                .default_value(saved)
+        })
+    }
+
+    fn api_key_event(
+        &mut self,
+        field: ApiKeyField,
+        input: &Entity<InputState>,
+        event: &InputEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            InputEvent::Change => {
+                let value = input.read(cx).value().trim().to_owned();
+                let saved = match field {
+                    ApiKeyField::LastFm => &mut self.store.lastfm_api_key,
+                    ApiKeyField::YouTube => &mut self.store.youtube_api_key,
+                    ApiKeyField::RapidApi => &mut self.store.rapidapi_key,
+                };
+                if *saved != value {
+                    *saved = value;
+                    self.api_keys_dirty = true;
+                    cx.notify();
+                }
+            }
+            InputEvent::Blur | InputEvent::PressEnter { .. } => self.save_api_keys(cx),
+            InputEvent::Focus => {}
+        }
+    }
+
+    fn save_api_keys(&mut self, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.api_keys_dirty) {
+            self.save_current_store(cx);
+        }
+    }
+
+    fn api_key_input_focused(&self, window: &Window, cx: &App) -> bool {
+        [
+            &self.lastfm_key_input,
+            &self.youtube_key_input,
+            &self.rapidapi_key_input,
+        ]
+        .iter()
+        .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
     }
 
     pub fn toggle_settings(&mut self, cx: &mut Context<Self>) {
@@ -1976,7 +2072,10 @@ impl Render for NoirPlayerModel {
                 .read(cx)
                 .focus_handle(cx)
                 .is_focused(window);
-            if !search_focused && !self.settings_focus_handle.is_focused(window) {
+            if !search_focused
+                && !self.api_key_input_focused(window, cx)
+                && !self.settings_focus_handle.is_focused(window)
+            {
                 window.focus(&self.settings_focus_handle, cx);
             }
         } else {

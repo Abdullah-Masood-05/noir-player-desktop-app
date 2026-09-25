@@ -4,6 +4,16 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+### Discover
+
+- **Noir Player's Server**: Trending, search and song lookups in Discover are
+  served by Noir Player's own server. Searches other people have already made
+  come back from its cache, so they are quick.
+- **Your Own API Keys**: Settings has a Discover section where you can enter a
+  Last.fm, YouTube Data API or RapidAPI key of your own. Any service you give a
+  key is called directly, on your own quota; the rest go through Noir Player's
+  server. Keys are masked, with a button to show them.
+
 ## [2.1.2]
 
 ### Fixes

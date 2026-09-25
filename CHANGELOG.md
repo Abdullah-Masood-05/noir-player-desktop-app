@@ -4,7 +4,14 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
-### Discover
+## [2.2.0]
+
+### Discover Through Noir Player's Server
+
+Version 2.2.0 gives Discover a server of its own and lets you bring your own
+API keys.
+
+### Highlights & New Features
 
 - **Noir Player's Server**: Trending, search and song lookups in Discover are
   served by Noir Player's own server. Searches other people have already made

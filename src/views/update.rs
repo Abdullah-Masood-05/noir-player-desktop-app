@@ -505,7 +505,8 @@ fn render_notes_content(notes: &str, is_light: bool) -> Vec<Div> {
         if line.trim().is_empty() {
             continue;
         }
-        let is_continuation = line.starts_with("  ") && !line.trim_start().starts_with('-')
+        let is_continuation = line.starts_with("  ")
+            && !line.trim_start().starts_with('-')
             && !line.trim_start().starts_with('*')
             && !line.trim_start().starts_with('#');
         if is_continuation {

@@ -800,16 +800,15 @@ mod tests {
         // Test the underlying `windows_asset` with explicit scopes instead.
         #[cfg(target_os = "windows")]
         {
-            let per_user = windows_asset(&assets, InstallScope::PerUser)
-                .expect("per-user asset");
+            let per_user = windows_asset(&assets, InstallScope::PerUser).expect("per-user asset");
             assert!(
                 per_user.name.ends_with("-setup.exe"),
                 "PerUser should prefer -setup.exe, got {}",
                 per_user.name
             );
 
-            let per_machine = windows_asset(&assets, InstallScope::PerMachine)
-                .expect("per-machine asset");
+            let per_machine =
+                windows_asset(&assets, InstallScope::PerMachine).expect("per-machine asset");
             assert!(
                 per_machine.name.ends_with(".msi"),
                 "PerMachine should prefer .msi, got {}",

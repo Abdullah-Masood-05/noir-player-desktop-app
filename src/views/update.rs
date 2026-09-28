@@ -289,7 +289,10 @@ fn progress_section(status: &UpdateStatus, is_light: bool) -> Option<Div> {
         ),
         UpdateStatus::Ready(path) => Some(
             v_flex().w_full().gap(px(4.0)).child(note(
-                if crate::update::installs_in_place() {
+                if cfg!(target_os = "linux") && crate::update::installs_in_place() {
+                    "Downloaded and verified. Installing asks for your password, then Noir Player reopens."
+                        .to_string()
+                } else if crate::update::installs_in_place() {
                     "Downloaded and verified. Noir Player will close while it installs, then reopen."
                         .to_string()
                 } else {
@@ -308,6 +311,11 @@ fn progress_section(status: &UpdateStatus, is_light: bool) -> Option<Div> {
             v_flex()
                 .w_full()
                 .child(note("Starting the installer...".to_string(), muted)),
+        ),
+        UpdateStatus::Notice(message) => Some(
+            v_flex()
+                .w_full()
+                .child(note(message.clone(), muted)),
         ),
         UpdateStatus::Error(message) => Some(
             v_flex()
@@ -416,7 +424,9 @@ fn modal_footer(
             .child(
                 primary_button(
                     "update-install-btn",
-                    if crate::update::installs_in_place() {
+                    if cfg!(target_os = "linux") && crate::update::installs_in_place() {
+                        "Install and restart"
+                    } else if crate::update::installs_in_place() {
                         "Restart and install"
                     } else {
                         "Open installer"
@@ -439,6 +449,15 @@ fn modal_footer(
                 .font_weight(FontWeight::BOLD)
                 .text_color(if is_light { c(0x71717A) } else { white(0.5) })
                 .child("Installing..."),
+        ),
+        UpdateStatus::Notice(_) => actions.child(
+            secondary_button("update-dismiss-btn", "Close", is_light).on_click(cx.listener(
+                |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.update_dialog_open = false;
+                    cx.notify();
+                },
+            )),
         ),
         UpdateStatus::Error(_) => actions
             .child(

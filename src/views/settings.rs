@@ -974,6 +974,9 @@ fn build_rows(
                 "Starting the installer...".to_string(),
                 UpdateAction::Busy("Installing..."),
             ),
+            crate::update::UpdateStatus::Notice(ref message) => {
+                (message.clone(), UpdateAction::Check)
+            }
             crate::update::UpdateStatus::Error(ref e) => {
                 (format!("Update failed: {e}"), UpdateAction::Check)
             }

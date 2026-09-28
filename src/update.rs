@@ -3,8 +3,10 @@
 //! The app asks GitHub Releases for the latest tag, picks the asset that
 //! matches the running platform, downloads it with a progress callback,
 //! verifies it against the release checksums, and hands it to the platform
-//! installer. Installation always runs after the app exits, so the installer
-//! can replace files that are in use.
+//! installer. On Windows and macOS installation runs after the app exits, so
+//! the installer can replace files that are in use. Linux can replace files
+//! that are in use, so the package manager installs the update while the app
+//! is still open, and the app then reopens itself.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -64,21 +66,151 @@ pub enum UpdateStatus {
     /// The installer is downloaded and verified, waiting for a restart.
     Ready(PathBuf),
     Installing,
+    /// The updater stopped short of installing for a reason that is not a
+    /// failure, such as a sandboxed install. The text tells the user why.
+    Notice(String),
     Error(String),
 }
 
-pub fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
-    let v = v.trim().trim_start_matches(['v', 'V']);
-    let core = v.split(['-', '+']).next()?;
-    let mut parts = core.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next().unwrap_or("0").parse().ok()?;
-    Some((major, minor, patch))
+/// What the app should do once the installer has been started.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InstallOutcome {
+    /// Quit now. A helper either installs the update once this process has
+    /// exited, or reopens the app after an install that already finished.
+    Quit,
+    /// Keep running. The text says what happened instead of an install.
+    Stay(String),
 }
 
+/// A release version, ordered by semver precedence. Build metadata after `+`
+/// is dropped when parsing, since it takes no part in the ordering.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Version {
+    core: (u64, u64, u64),
+    /// Dot separated prerelease identifiers; empty for a full release.
+    pre: Vec<PreIdentifier>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PreIdentifier {
+    /// Digits with leading zeros removed, kept as text so a long run of
+    /// digits cannot overflow.
+    Numeric(String),
+    Alphanumeric(String),
+}
+
+impl Version {
+    /// Reads `1.2.3`, `v1.2`, `2.3.0-rc.1` or `1.0.0+build.5`. Missing minor
+    /// and patch numbers count as zero. Anything else is `None`.
+    fn parse(text: &str) -> Option<Self> {
+        let text = text.trim();
+        let text = text
+            .strip_prefix(['v', 'V'])
+            .unwrap_or(text)
+            .split('+')
+            .next()?;
+        let (core, pre) = match text.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (text, None),
+        };
+
+        let mut numbers = [0_u64; 3];
+        let mut parts = core.split('.');
+        for (index, part) in parts.by_ref().take(3).enumerate() {
+            if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            numbers[index] = part.parse().ok()?;
+        }
+        // Four or more numbers is not a version this project publishes.
+        if parts.next().is_some() {
+            return None;
+        }
+
+        let pre = match pre {
+            None => Vec::new(),
+            Some(pre) => pre
+                .split('.')
+                .map(|identifier| {
+                    if identifier.is_empty()
+                        || !identifier
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    {
+                        None
+                    } else if identifier.bytes().all(|b| b.is_ascii_digit()) {
+                        let trimmed = identifier.trim_start_matches('0');
+                        Some(PreIdentifier::Numeric(
+                            if trimmed.is_empty() { "0" } else { trimmed }.to_string(),
+                        ))
+                    } else {
+                        Some(PreIdentifier::Alphanumeric(identifier.to_string()))
+                    }
+                })
+                .collect::<Option<Vec<_>>>()?,
+        };
+
+        Some(Self {
+            core: (numbers[0], numbers[1], numbers[2]),
+            pre,
+        })
+    }
+}
+
+impl Ord for PreIdentifier {
+    /// Semver §11: numeric identifiers compare numerically and sort below
+    /// alphanumeric ones, which compare in ASCII order.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Self::Numeric(a), Self::Numeric(b)) => a.len().cmp(&b.len()).then_with(|| a.cmp(b)),
+            (Self::Numeric(_), Self::Alphanumeric(_)) => Ordering::Less,
+            (Self::Alphanumeric(_), Self::Numeric(_)) => Ordering::Greater,
+            (Self::Alphanumeric(a), Self::Alphanumeric(b)) => a.cmp(b),
+        }
+    }
+}
+
+impl PartialOrd for PreIdentifier {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Version {
+    /// A prerelease sorts below the release it leads up to, so `2.3.0-rc1`
+    /// is older than `2.3.0`. Between prereleases, the first differing
+    /// identifier decides, and a shorter list that matches so far is older.
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        self.core
+            .cmp(&other.core)
+            .then_with(|| match (self.pre.is_empty(), other.pre.is_empty()) {
+                (true, true) => Ordering::Equal,
+                (true, false) => Ordering::Greater,
+                (false, true) => Ordering::Less,
+                (false, false) => self.pre.cmp(&other.pre),
+            })
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// The `(major, minor, patch)` numbers of a version, ignoring any prerelease
+/// or build suffix.
+pub fn parse_version(v: &str) -> Option<(u64, u64, u64)> {
+    Version::parse(v).map(|version| version.core)
+}
+
+/// Whether `remote` is a later release than `current` by semver precedence.
+/// A version that cannot be read is never newer, so a malformed tag cannot
+/// prompt an update.
 pub fn is_newer(remote: &str, current: &str) -> bool {
-    match (parse_version(remote), parse_version(current)) {
+    match (Version::parse(remote), Version::parse(current)) {
         (Some(r), Some(c)) => r > c,
         _ => false,
     }
@@ -183,49 +315,26 @@ fn parse_release(json: &Value) -> Result<ReleaseInfo> {
     })
 }
 
-/// Extension of the package this Linux system can install, read from
-/// `/etc/os-release`. Debian packages are the fallback because the project
-/// builds on Ubuntu.
-#[cfg(target_os = "linux")]
-fn linux_package_extension() -> &'static str {
-    let release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
-    let family = release.to_ascii_lowercase();
-    if family.contains("arch") || family.contains("manjaro") {
-        ".pkg.tar.zst"
-    } else if family.contains("fedora")
-        || family.contains("rhel")
-        || family.contains("centos")
-        || family.contains("suse")
-    {
-        ".rpm"
-    } else {
-        ".deb"
-    }
-}
-
 /// Picks the release asset that this platform can install.
 pub fn platform_asset(assets: &[ReleaseAsset]) -> Option<&ReleaseAsset> {
     #[cfg(target_os = "windows")]
     {
         windows_asset(assets, install_scope())
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        let find = |suffix: &str| {
-            assets
-                .iter()
-                .find(|asset| asset.name.to_ascii_lowercase().ends_with(suffix))
-        };
-        #[cfg(target_os = "macos")]
-        {
-            find(".dmg")
-        }
-        #[cfg(target_os = "linux")]
-        {
-            find(linux_package_extension())
-                .or_else(|| find(".deb"))
-                .or_else(|| find(".rpm"))
-        }
+        assets
+            .iter()
+            .find(|asset| asset.name.to_ascii_lowercase().ends_with(".dmg"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // The package the running copy came from, so the package manager can
+        // upgrade it. Sandboxed copies fall back to the distribution's format.
+        let package = linux::detected()
+            .package()
+            .unwrap_or_else(linux::system_package);
+        linux::asset(assets, package)
     }
 }
 
@@ -479,10 +588,12 @@ pub fn find_checksum(text: &str, asset_name: &str) -> Option<String> {
     None
 }
 
-/// Starts the installer and returns once it is running detached from this
-/// process. The caller is expected to quit immediately afterwards: the helper
-/// waits for this process to exit before touching any installed files.
-pub fn launch_installer(installer: &Path) -> Result<()> {
+/// Starts the installer. On Windows and macOS it returns once a helper runs
+/// detached from this process, and the caller is expected to quit straight
+/// away: the helper waits for this process to exit before touching any
+/// installed files. On Linux it blocks until the package manager finishes,
+/// so call it off the UI thread.
+pub fn launch_installer(installer: &Path) -> Result<InstallOutcome> {
     let installer = plain_absolute(installer);
     if !installer.is_file() {
         bail!("The downloaded installer is missing.");
@@ -521,7 +632,7 @@ fn plain_absolute(path: &Path) -> PathBuf {
 }
 
 #[cfg(target_os = "windows")]
-fn spawn_installer(installer: &Path) -> Result<()> {
+fn spawn_installer(installer: &Path) -> Result<InstallOutcome> {
     use std::os::windows::process::CommandExt;
 
     // A hidden console, not a detached process: `start` needs a console to
@@ -542,7 +653,7 @@ fn spawn_installer(installer: &Path) -> Result<()> {
         .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
         .spawn()
         .context("Could not start the installer")?;
-    Ok(())
+    Ok(InstallOutcome::Quit)
 }
 
 /// Batch helper that waits for the app to exit, installs it, starts the new
@@ -617,7 +728,7 @@ fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) ->
 }
 
 #[cfg(target_os = "macos")]
-fn spawn_installer(installer: &Path) -> Result<()> {
+fn spawn_installer(installer: &Path) -> Result<InstallOutcome> {
     use std::os::unix::fs::PermissionsExt;
 
     let pid = std::process::id();
@@ -705,24 +816,604 @@ fn spawn_installer(installer: &Path) -> Result<()> {
         .arg(&script_path)
         .spawn()
         .context("Could not start the installer")?;
-    Ok(())
+    Ok(InstallOutcome::Quit)
 }
 
 #[cfg(target_os = "linux")]
-fn spawn_installer(installer: &Path) -> Result<()> {
-    // Distribution packages need root, so the desktop's package installer
-    // takes over from here.
-    std::process::Command::new("xdg-open")
-        .arg(installer)
-        .spawn()
-        .context("Could not open the downloaded package. Install it with your package manager.")?;
-    Ok(())
+fn spawn_installer(installer: &Path) -> Result<InstallOutcome> {
+    linux::install(installer)
 }
 
 /// Whether this platform installs the update itself, or hands the file to the
-/// system and leaves the app running.
-pub const fn installs_in_place() -> bool {
-    cfg!(any(target_os = "windows", target_os = "macos"))
+/// system and leaves the app running. A sandboxed Linux copy (AppImage,
+/// Flatpak, Snap) updates through its own channel, so it is handed over.
+pub fn installs_in_place() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        linux::detected().package().is_some()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        cfg!(any(target_os = "windows", target_os = "macos"))
+    }
+}
+
+/// Linux installs: how the running copy was installed, which package to
+/// fetch, and the `pkexec` command that upgrades it in place.
+///
+/// The pure functions here build on every host so their tests run
+/// everywhere. Only the parts that read the environment or start processes
+/// are Linux only, which keeps the tests deterministic.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod linux {
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    #[cfg(target_os = "linux")]
+    use super::InstallOutcome;
+    use super::ReleaseAsset;
+    #[cfg(target_os = "linux")]
+    use anyhow::{bail, Context, Result};
+
+    /// Package formats the updater can install.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Package {
+        Deb,
+        Rpm,
+        Pacman,
+    }
+
+    impl Package {
+        pub const fn extension(self) -> &'static str {
+            match self {
+                Self::Deb => ".deb",
+                Self::Rpm => ".rpm",
+                Self::Pacman => ".pkg.tar.zst",
+            }
+        }
+
+        /// The package manager `pkexec` runs to install this format.
+        pub const fn manager(self) -> &'static str {
+            match self {
+                Self::Deb => "apt-get",
+                Self::Rpm => "dnf",
+                Self::Pacman => "pacman",
+            }
+        }
+
+        /// The format of a downloaded package, read from its file name.
+        pub fn of_file(path: &Path) -> Option<Self> {
+            let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+            [Self::Deb, Self::Rpm, Self::Pacman]
+                .into_iter()
+                .find(|package| name.ends_with(package.extension()))
+        }
+    }
+
+    /// How the running copy of the app was installed.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Install {
+        /// A distribution package. When no package manager claims the
+        /// executable, this is the distribution's own format instead.
+        Package(Package),
+        /// Self-contained or sandboxed formats, which update through their
+        /// own channel rather than a downloaded package.
+        AppImage,
+        Flatpak,
+        Snap,
+    }
+
+    impl Install {
+        pub const fn package(self) -> Option<Package> {
+            match self {
+                Self::Package(package) => Some(package),
+                Self::AppImage | Self::Flatpak | Self::Snap => None,
+            }
+        }
+    }
+
+    /// A program and its arguments, ready to run.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct InstallCommand {
+        pub program: &'static str,
+        pub args: Vec<OsString>,
+    }
+
+    /// The `pkexec` command that installs `package` over the running copy,
+    /// or the reason the app should hand the file to the desktop instead.
+    /// The path must be absolute: `apt-get` reads a bare file name as the
+    /// name of a package in its repositories.
+    pub fn install_command(install: Install, package: &Path) -> Result<InstallCommand, String> {
+        let kind = match install {
+            Install::Package(kind) => kind,
+            Install::AppImage => {
+                return Err("Noir Player is running as an AppImage, which it does not \
+                            update itself."
+                    .to_string())
+            }
+            Install::Flatpak => {
+                return Err("Noir Player is running as a Flatpak, which updates \
+                            through Flatpak rather than a downloaded package."
+                    .to_string())
+            }
+            Install::Snap => {
+                return Err("Noir Player is running as a Snap, which updates \
+                            through the Snap Store rather than a downloaded package."
+                    .to_string())
+            }
+        };
+        // `has_root` rather than `is_absolute` so the tests read the same on
+        // a Windows host, where `/tmp` has no drive letter.
+        if !package.has_root() {
+            return Err("The downloaded package has no absolute path.".to_string());
+        }
+        if Package::of_file(package) != Some(kind) {
+            return Err(format!(
+                "The downloaded package is not a {} package, which is how Noir \
+                 Player was installed here.",
+                kind.extension()
+            ));
+        }
+
+        let args: &[&str] = match kind {
+            Package::Deb => &["apt-get", "install", "-y"],
+            Package::Rpm => &["dnf", "install", "-y"],
+            Package::Pacman => &["pacman", "-U", "--noconfirm"],
+        };
+        let mut args: Vec<OsString> = args.iter().map(OsString::from).collect();
+        args.push(package.as_os_str().to_owned());
+        Ok(InstallCommand {
+            program: "pkexec",
+            args,
+        })
+    }
+
+    /// A message for a failed install. `pkexec` exits 126 when the password
+    /// prompt is dismissed and 127 when this account is not authorized;
+    /// anything else is the package manager's own exit code.
+    pub fn install_failure(manager: &str, code: Option<i32>, stderr: &str) -> String {
+        match code {
+            Some(126) => "The password prompt was closed, so the update was not \
+                          installed."
+                .to_string(),
+            Some(127) => "This account is not allowed to install software, so the \
+                          update was not installed. Ask an administrator to install \
+                          the downloaded package."
+                .to_string(),
+            code => {
+                let detail = stderr
+                    .lines()
+                    .map(str::trim)
+                    .rfind(|line| !line.is_empty())
+                    .map(|line| format!(": {line}"))
+                    .unwrap_or_default();
+                match code {
+                    Some(code) => {
+                        format!("{manager} could not install the update (exit code {code}){detail}")
+                    }
+                    None => format!("{manager} stopped before the update was installed{detail}"),
+                }
+            }
+        }
+    }
+
+    /// Shell script that waits for process `pid` to exit, then runs the
+    /// executable passed as `$1`. Starting the new build any earlier would
+    /// find this instance still holding the single instance socket, and it
+    /// would hand itself over to the process that is about to quit. The wait
+    /// gives up after 30 seconds rather than hang behind a process that never
+    /// gets reaped.
+    pub fn relaunch_script(pid: u32) -> String {
+        format!(
+            "i=0; while kill -0 {pid} 2>/dev/null && [ $i -lt 30 ]; do i=$((i+1)); sleep 1; done; \
+             exec \"$1\""
+        )
+    }
+
+    /// Picks the release asset in `preferred` format, then any Debian or RPM
+    /// package.
+    pub fn asset(assets: &[ReleaseAsset], preferred: Package) -> Option<&ReleaseAsset> {
+        let find = |suffix: &str| {
+            assets
+                .iter()
+                .find(|asset| asset.name.to_ascii_lowercase().ends_with(suffix))
+        };
+        find(preferred.extension())
+            .or_else(|| find(Package::Deb.extension()))
+            .or_else(|| find(Package::Rpm.extension()))
+    }
+
+    /// The package format of a distribution, read from `/etc/os-release`.
+    /// Debian packages are the fallback because the project builds on Ubuntu.
+    pub fn distribution_package(os_release: &str) -> Package {
+        let family = os_release.to_ascii_lowercase();
+        if family.contains("arch") || family.contains("manjaro") {
+            Package::Pacman
+        } else if family.contains("fedora")
+            || family.contains("rhel")
+            || family.contains("centos")
+            || family.contains("suse")
+        {
+            Package::Rpm
+        } else {
+            Package::Deb
+        }
+    }
+
+    /// The package format of the distribution this copy runs on.
+    #[cfg(target_os = "linux")]
+    pub fn system_package() -> Package {
+        distribution_package(&std::fs::read_to_string("/etc/os-release").unwrap_or_default())
+    }
+
+    /// How the running copy was installed, worked out once per run since it
+    /// asks the package managers.
+    #[cfg(target_os = "linux")]
+    pub fn detected() -> Install {
+        static DETECTED: std::sync::OnceLock<Install> = std::sync::OnceLock::new();
+        *DETECTED.get_or_init(detect)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn detect() -> Install {
+        let set = |name: &str| std::env::var_os(name).is_some_and(|value| !value.is_empty());
+        if set("APPIMAGE") {
+            return Install::AppImage;
+        }
+        if set("FLATPAK_ID") || Path::new("/.flatpak-info").exists() {
+            return Install::Flatpak;
+        }
+        if set("SNAP") {
+            return Install::Snap;
+        }
+        let owner = running_executable()
+            .ok()
+            .and_then(|exe| owning_package(&exe));
+        Install::Package(owner.unwrap_or_else(system_package))
+    }
+
+    /// Asks each package manager whether it owns `exe`. A manager that is
+    /// not installed fails to start and is skipped.
+    #[cfg(target_os = "linux")]
+    fn owning_package(exe: &Path) -> Option<Package> {
+        use std::process::{Command, Stdio};
+
+        [
+            (Package::Deb, "dpkg", "-S"),
+            (Package::Rpm, "rpm", "-qf"),
+            (Package::Pacman, "pacman", "-Qo"),
+        ]
+        .into_iter()
+        .find(|(_, program, flag)| {
+            Command::new(program)
+                .arg(flag)
+                .arg(exe)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        })
+        .map(|(package, ..)| package)
+    }
+
+    /// The path of the running executable. The kernel appends ` (deleted)`
+    /// once a package upgrade has replaced the file this process started
+    /// from; the path itself then holds the new build.
+    #[cfg(target_os = "linux")]
+    fn running_executable() -> Result<std::path::PathBuf> {
+        let exe = std::env::current_exe().context("Could not locate the running application")?;
+        Ok(
+            match exe
+                .to_str()
+                .and_then(|text| text.strip_suffix(" (deleted)"))
+            {
+                Some(path) => std::path::PathBuf::from(path),
+                None => exe,
+            },
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    fn on_path(program: &str) -> bool {
+        std::env::var_os("PATH").is_some_and(|paths| {
+            std::env::split_paths(&paths).any(|dir| dir.join(program).is_file())
+        })
+    }
+
+    /// Installs `package` with the system package manager through `pkexec`,
+    /// then starts a helper that reopens the app once it quits. Anything that
+    /// rules out installing hands the file to the desktop instead, the way
+    /// the updater always did on Linux.
+    #[cfg(target_os = "linux")]
+    pub fn install(package: &Path) -> Result<InstallOutcome> {
+        use std::process::{Command, Stdio};
+
+        // Read before installing: afterwards the kernel reports the old file
+        // as deleted.
+        let exe = running_executable()?;
+        let install = detected();
+        let command = match install_command(install, package) {
+            Ok(command) => command,
+            Err(reason) => return open_package(package, &reason),
+        };
+        let manager = install
+            .package()
+            .map_or("The package manager", Package::manager);
+        if !on_path(manager) {
+            return open_package(
+                package,
+                &format!("{manager} was not found to install the update."),
+            );
+        }
+
+        let output = match Command::new(command.program)
+            .args(&command.args)
+            .stdin(Stdio::null())
+            .output()
+        {
+            Ok(output) => output,
+            Err(_) => {
+                return open_package(
+                    package,
+                    "pkexec, which asks for the password to install software, could \
+                     not be started.",
+                )
+            }
+        };
+        if !output.status.success() {
+            bail!(install_failure(
+                manager,
+                output.status.code(),
+                &String::from_utf8_lossy(&output.stderr),
+            ));
+        }
+
+        let relaunch = Command::new("/bin/sh")
+            .arg("-c")
+            .arg(relaunch_script(std::process::id()))
+            .arg("noir-player-relaunch")
+            .arg(&exe)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+        Ok(match relaunch {
+            Ok(_) => InstallOutcome::Quit,
+            // Installed, but nothing would reopen the app, so leave it open.
+            Err(_) => InstallOutcome::Stay(
+                "The update is installed. Restart Noir Player to start using it.".to_string(),
+            ),
+        })
+    }
+
+    /// Hands `package` to the desktop's software installer, explaining why
+    /// with `reason`.
+    #[cfg(target_os = "linux")]
+    fn open_package(package: &Path, reason: &str) -> Result<InstallOutcome> {
+        std::process::Command::new("xdg-open")
+            .arg(package)
+            .spawn()
+            .context(
+                "Could not open the downloaded package. Install it with your package manager.",
+            )?;
+        Ok(InstallOutcome::Stay(format!(
+            "{reason} The downloaded package was opened in your software installer instead."
+        )))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn args(command: &InstallCommand) -> Vec<&str> {
+            command
+                .args
+                .iter()
+                .map(|arg| arg.to_str().unwrap())
+                .collect()
+        }
+
+        #[test]
+        fn each_package_manager_installs_through_pkexec() {
+            let deb = install_command(
+                Install::Package(Package::Deb),
+                Path::new("/home/me/.cache/noir-player/updates/noir-player-2.3.0-linux-x64.deb"),
+            )
+            .unwrap();
+            assert_eq!(deb.program, "pkexec");
+            assert_eq!(
+                args(&deb),
+                [
+                    "apt-get",
+                    "install",
+                    "-y",
+                    "/home/me/.cache/noir-player/updates/noir-player-2.3.0-linux-x64.deb"
+                ]
+            );
+
+            let rpm = install_command(
+                Install::Package(Package::Rpm),
+                Path::new("/tmp/noir-player-2.3.0-linux-x64.rpm"),
+            )
+            .unwrap();
+            assert_eq!(rpm.program, "pkexec");
+            assert_eq!(
+                args(&rpm),
+                [
+                    "dnf",
+                    "install",
+                    "-y",
+                    "/tmp/noir-player-2.3.0-linux-x64.rpm"
+                ]
+            );
+
+            let pacman = install_command(
+                Install::Package(Package::Pacman),
+                Path::new("/tmp/noir-player-2.3.0-x86_64.pkg.tar.zst"),
+            )
+            .unwrap();
+            assert_eq!(pacman.program, "pkexec");
+            assert_eq!(
+                args(&pacman),
+                [
+                    "pacman",
+                    "-U",
+                    "--noconfirm",
+                    "/tmp/noir-player-2.3.0-x86_64.pkg.tar.zst"
+                ]
+            );
+        }
+
+        #[test]
+        fn a_path_with_spaces_stays_one_argument() {
+            let command = install_command(
+                Install::Package(Package::Deb),
+                Path::new("/home/Jane Doe/.cache/noir player/update.deb"),
+            )
+            .unwrap();
+            assert_eq!(command.args.len(), 4);
+            assert_eq!(
+                command.args[3],
+                OsString::from("/home/Jane Doe/.cache/noir player/update.deb")
+            );
+        }
+
+        #[test]
+        fn sandboxed_installs_are_never_installed_over() {
+            let path = Path::new("/tmp/noir-player-2.3.0-linux-x64.deb");
+            for (install, name) in [
+                (Install::AppImage, "AppImage"),
+                (Install::Flatpak, "Flatpak"),
+                (Install::Snap, "Snap"),
+            ] {
+                let reason = install_command(install, path).unwrap_err();
+                assert!(reason.contains(name), "{reason}");
+                assert_eq!(install.package(), None);
+            }
+        }
+
+        #[test]
+        fn a_relative_path_or_a_mismatched_package_is_not_installed() {
+            assert!(
+                install_command(Install::Package(Package::Deb), Path::new("update.deb")).is_err()
+            );
+            // `apt-get` must never be handed an RPM, nor `pacman` a Debian
+            // package.
+            assert!(
+                install_command(Install::Package(Package::Deb), Path::new("/tmp/update.rpm"))
+                    .is_err()
+            );
+            assert!(install_command(
+                Install::Package(Package::Pacman),
+                Path::new("/tmp/update.deb")
+            )
+            .is_err());
+        }
+
+        #[test]
+        fn package_formats_are_read_from_file_names() {
+            assert_eq!(
+                Package::of_file(Path::new("/tmp/a.deb")),
+                Some(Package::Deb)
+            );
+            assert_eq!(
+                Package::of_file(Path::new("/tmp/A.RPM")),
+                Some(Package::Rpm)
+            );
+            assert_eq!(
+                Package::of_file(Path::new("/tmp/a-x86_64.pkg.tar.zst")),
+                Some(Package::Pacman)
+            );
+            assert_eq!(Package::of_file(Path::new("/tmp/a.tar.zst")), None);
+            assert_eq!(Package::of_file(Path::new("/tmp/a.AppImage")), None);
+        }
+
+        #[test]
+        fn pkexec_exit_codes_read_as_messages() {
+            let dismissed = install_failure("apt-get", Some(126), "");
+            assert!(
+                dismissed.contains("password prompt was closed"),
+                "{dismissed}"
+            );
+            let refused = install_failure("apt-get", Some(127), "");
+            assert!(refused.contains("not allowed"), "{refused}");
+
+            let failed = install_failure(
+                "apt-get",
+                Some(100),
+                "Reading package lists...\nE: Unable to locate package\n\n",
+            );
+            assert_eq!(
+                failed,
+                "apt-get could not install the update (exit code 100): E: Unable to locate package"
+            );
+            assert_eq!(
+                install_failure("dnf", None, ""),
+                "dnf stopped before the update was installed"
+            );
+        }
+
+        #[test]
+        fn relaunch_waits_for_this_process_then_runs_the_same_path() {
+            let script = relaunch_script(4242);
+            assert!(script.contains("kill -0 4242"));
+            assert!(script.contains("-lt 30"));
+            // The executable arrives as an argument, so no path is ever
+            // spliced into the script and quoting cannot break it.
+            assert!(script.ends_with("exec \"$1\""));
+        }
+
+        #[test]
+        fn assets_follow_the_install_then_fall_back() {
+            let release_asset = |name: &str| ReleaseAsset {
+                name: name.to_string(),
+                url: format!("https://example.invalid/{name}"),
+                size: 1,
+            };
+            let assets = vec![
+                release_asset("noir-player-2.3.0-linux-x64.deb"),
+                release_asset("noir-player-2.3.0-linux-x64.rpm"),
+                release_asset("noir-player-2.3.0-x86_64.pkg.tar.zst"),
+            ];
+            for package in [Package::Deb, Package::Rpm, Package::Pacman] {
+                let picked = asset(&assets, package).unwrap();
+                assert!(
+                    picked.name.ends_with(package.extension()),
+                    "{}",
+                    picked.name
+                );
+            }
+
+            let only_rpm = vec![release_asset("noir-player-2.3.0-linux-x64.rpm")];
+            assert_eq!(
+                asset(&only_rpm, Package::Pacman).map(|a| a.name.as_str()),
+                Some("noir-player-2.3.0-linux-x64.rpm")
+            );
+            assert!(asset(&[release_asset("SHA256SUMS")], Package::Deb).is_none());
+        }
+
+        #[test]
+        fn distributions_map_to_their_package_format() {
+            assert_eq!(
+                distribution_package("NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n"),
+                Package::Deb
+            );
+            assert_eq!(
+                distribution_package("NAME=\"Fedora Linux\"\nID=fedora\n"),
+                Package::Rpm
+            );
+            assert_eq!(
+                distribution_package("NAME=\"openSUSE Tumbleweed\"\nID_LIKE=\"opensuse suse\"\n"),
+                Package::Rpm
+            );
+            assert_eq!(
+                distribution_package("NAME=\"Arch Linux\"\nID=arch\n"),
+                Package::Pacman
+            );
+            assert_eq!(distribution_package(""), Package::Deb);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -758,6 +1449,93 @@ mod tests {
         assert!(!is_newer("v1.2.0", "1.2.0"));
         assert!(!is_newer("1.1.3", "1.2.0"));
         assert!(!is_newer("1.0.0", "1.2.0"));
+    }
+
+    #[test]
+    fn a_prerelease_is_older_than_its_release() {
+        assert!(is_newer("2.3.0", "2.3.0-rc1"));
+        assert!(!is_newer("2.3.0-rc1", "2.3.0"));
+        assert!(!is_newer("2.3.0-rc1", "2.3.0-rc1"));
+        assert!(is_newer("1.2.1", "1.2.1-rc1"));
+        assert!(!is_newer("v1.2.1-rc1", "1.2.1"));
+        // A prerelease of a later version still beats an earlier release.
+        assert!(is_newer("2.3.0-rc1", "2.2.0"));
+        assert!(!is_newer("2.2.0", "2.3.0-rc1"));
+    }
+
+    /// The precedence example from semver §11, in ascending order.
+    #[test]
+    fn prerelease_identifiers_follow_semver_precedence() {
+        let ordered = [
+            "1.0.0-alpha",
+            "1.0.0-alpha.1",
+            "1.0.0-alpha.beta",
+            "1.0.0-beta",
+            "1.0.0-beta.2",
+            "1.0.0-beta.11",
+            "1.0.0-rc.1",
+            "1.0.0",
+        ];
+        for (index, lower) in ordered.iter().enumerate() {
+            for higher in &ordered[index + 1..] {
+                assert!(
+                    is_newer(higher, lower),
+                    "{higher} should be newer than {lower}"
+                );
+                assert!(
+                    !is_newer(lower, higher),
+                    "{lower} should be older than {higher}"
+                );
+            }
+        }
+
+        // Numeric identifiers compare as numbers, however long, and sort
+        // below alphanumeric ones.
+        assert!(is_newer("1.0.0-rc.10", "1.0.0-rc.9"));
+        assert!(is_newer("1.0.0-alpha", "1.0.0-1"));
+        assert!(is_newer(
+            "1.0.0-99999999999999999999999",
+            "1.0.0-9999999999999999999999"
+        ));
+        assert!(!is_newer("1.0.0-rc.01", "1.0.0-rc.1"));
+        assert!(is_newer("1.0.0-rc-2", "1.0.0-rc-1"));
+    }
+
+    #[test]
+    fn build_metadata_and_missing_numbers_do_not_change_the_order() {
+        assert!(!is_newer("1.2.0+build.5", "1.2.0"));
+        assert!(!is_newer("1.2.0", "1.2.0+build.5"));
+        assert!(!is_newer("1.2.0+b", "1.2.0+a"));
+        assert!(!is_newer("2.3.0-rc.1+build.9", "2.3.0-rc.1"));
+        assert!(is_newer("2.3.0+build.1", "2.3.0-rc.1"));
+
+        assert_eq!(parse_version("2"), Some((2, 0, 0)));
+        assert!(!is_newer("2", "2.0.0"));
+        assert!(!is_newer("1.2", "1.2.0"));
+        assert!(is_newer("1.3", "1.2.9"));
+        assert!(is_newer("V2.3.0-RC1", "2.2.0"));
+    }
+
+    #[test]
+    fn unreadable_versions_are_never_newer() {
+        for bad in [
+            "",
+            "v",
+            "latest",
+            "1.x",
+            "1..2",
+            "1.2.3.4",
+            "-rc1",
+            "1.2.3-",
+            "1.2.3-rc..1",
+            "1.2.3-rc!1",
+            "1.2.3-rc 1",
+            "99999999999999999999999.0.0",
+        ] {
+            assert!(!is_newer(bad, "1.0.0"), "{bad:?} should not be newer");
+            assert!(!is_newer("1.0.0", bad), "nothing is newer than {bad:?}");
+            assert_eq!(parse_version(bad), None, "{bad:?}");
+        }
     }
 
     #[test]
@@ -826,12 +1604,15 @@ mod tests {
             );
         }
 
+        // On Linux `platform_asset` asks the package managers which one owns
+        // the running binary, and tests start no processes, so the pure
+        // selection is tested with each format in `linux::tests` instead.
         #[cfg(target_os = "linux")]
         {
-            let picked = platform_asset(&assets).expect("Linux asset");
+            let picked = linux::asset(&assets, linux::Package::Deb).expect("Linux asset");
             assert!(
-                picked.name.ends_with(".deb") || picked.name.ends_with(".rpm"),
-                "Linux should pick .deb or .rpm, got {}",
+                picked.name.ends_with(".deb"),
+                "Linux should pick .deb, got {}",
                 picked.name
             );
         }
@@ -840,6 +1621,9 @@ mod tests {
     #[test]
     fn platform_asset_is_none_without_a_matching_package() {
         let assets = vec![asset("SHA256SUMS"), asset("source.tar.gz")];
+        #[cfg(target_os = "linux")]
+        assert!(linux::asset(&assets, linux::Package::Deb).is_none());
+        #[cfg(not(target_os = "linux"))]
         assert!(platform_asset(&assets).is_none());
     }
 

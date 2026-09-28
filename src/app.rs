@@ -470,11 +470,18 @@ impl NoirPlayerModel {
         self.discover_audio_job.is_some()
     }
 
-    pub fn check_for_updates(&mut self, _manual: bool, cx: &mut Context<Self>) {
+    /// Asks GitHub for a newer release. A `manual` check comes from Check Now
+    /// and reports failures; the automatic check at launch only logs them and
+    /// puts the status back, so a flaky network never greets the user with an
+    /// error.
+    pub fn check_for_updates(&mut self, manual: bool, cx: &mut Context<Self>) {
         if self.update_status == crate::update::UpdateStatus::Checking {
             return;
         }
-        self.update_status = crate::update::UpdateStatus::Checking;
+        let previous = std::mem::replace(
+            &mut self.update_status,
+            crate::update::UpdateStatus::Checking,
+        );
         cx.notify();
 
         cx.spawn(async move |this, cx| {
@@ -489,12 +496,23 @@ impl NoirPlayerModel {
                         this.latest_release = Some(release.clone());
                         this.update_status = crate::update::UpdateStatus::Available(release);
                         this.update_dialog_open = true;
+                        // Works out how this copy was installed while the
+                        // user reads the notes, rather than on the UI thread
+                        // when they choose to download.
+                        #[cfg(target_os = "linux")]
+                        cx.background_executor()
+                            .spawn(async { crate::update::installs_in_place() })
+                            .detach();
                     }
                     Ok(None) => {
                         this.update_status = crate::update::UpdateStatus::UpToDate;
                     }
-                    Err(error) => {
+                    Err(error) if manual => {
                         this.update_status = crate::update::UpdateStatus::Error(error.to_string());
+                    }
+                    Err(error) => {
+                        eprintln!("Automatic update check failed: {error:#}");
+                        this.update_status = previous;
                     }
                 }
                 cx.notify();
@@ -621,7 +639,9 @@ impl NoirPlayerModel {
     }
 
     /// Hands the verified installer to the platform and quits, so it can
-    /// replace files this process is holding open.
+    /// replace files this process is holding open. On Linux the package
+    /// manager waits on a password prompt, so the installer is started off
+    /// the UI thread.
     pub fn install_update(&mut self, cx: &mut Context<Self>) {
         let crate::update::UpdateStatus::Ready(path) = self.update_status.clone() else {
             return;
@@ -629,25 +649,31 @@ impl NoirPlayerModel {
         self.update_status = crate::update::UpdateStatus::Installing;
         cx.notify();
 
-        match crate::update::launch_installer(&path) {
-            Ok(()) if crate::update::installs_in_place() => {
-                self.is_playing = false;
-                if let Some(player) = self.player.as_mut() {
-                    player.stop();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::update::launch_installer(&path) })
+                .await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(crate::update::InstallOutcome::Quit) => {
+                    this.is_playing = false;
+                    if let Some(player) = this.player.as_mut() {
+                        player.stop();
+                    }
+                    cx.quit();
                 }
-                cx.quit();
-            }
-            Ok(()) => {
-                // The system package installer took over; stay running.
-                self.update_status = crate::update::UpdateStatus::Ready(path);
-                self.update_dialog_open = false;
-                cx.notify();
-            }
-            Err(error) => {
-                self.update_status = crate::update::UpdateStatus::Error(format!("{error:#}"));
-                cx.notify();
-            }
-        }
+                Ok(crate::update::InstallOutcome::Stay(message)) => {
+                    this.update_status = crate::update::UpdateStatus::Notice(message);
+                    this.update_dialog_open = true;
+                    cx.notify();
+                }
+                Err(error) => {
+                    this.update_status = crate::update::UpdateStatus::Error(format!("{error:#}"));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     pub fn cancel_discover_audio(&mut self, cx: &mut Context<Self>) {

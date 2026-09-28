@@ -4,6 +4,23 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+### Fixes
+
+- **Release Candidates**: The updater ignored suffixes such as `-rc1`, so a
+  release candidate and its final release looked like the same version and
+  the final release was never offered. Versions now follow semver ordering:
+  a release candidate comes before its release, and build metadata is
+  ignored.
+- **Linux Updates Install Themselves**: The updater used to open the
+  downloaded package and leave the rest to you. It now installs it with your
+  package manager (`apt-get`, `dnf` or `pacman`) after asking for your
+  password, then reopens Noir Player. AppImage, Flatpak and Snap copies,
+  which update through their own channels, still open the package and say
+  why.
+- **Quiet Background Checks**: A failed update check at launch no longer
+  shows an error in Settings. Only a check you start with Check Now reports
+  failures.
+
 ## [2.2.0]
 
 ### Discover Through Noir Player's Server

@@ -2249,8 +2249,7 @@ impl Render for NoirPlayerModel {
             // would swallow Escape and the playback keys there.
             let search_keeps_focus =
                 active_tab != ActiveTab::Player && (lib_search_focused || disc_search_focused);
-            if !search_keeps_focus && !self.root_focus_handle.is_focused(window)
-            {
+            if !search_keeps_focus && !self.root_focus_handle.is_focused(window) {
                 window.focus(&self.root_focus_handle, cx);
             }
         }
@@ -2573,7 +2572,7 @@ fn volume_hud(volume: f32, is_light: bool) -> Div {
 
 #[cfg(test)]
 mod escape_tests {
-    use super::{EscapeAction, EscapeContext, escape_action};
+    use super::{escape_action, EscapeAction, EscapeContext};
 
     fn on_player() -> EscapeContext {
         EscapeContext {

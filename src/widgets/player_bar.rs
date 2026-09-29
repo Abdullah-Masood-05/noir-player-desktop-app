@@ -70,18 +70,24 @@ pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
                                 )),
                         )
                         .child(transport(model, is_playing, has_track, is_light, cx))
-                        .child(div().flex_1().min_w_0().overflow_hidden().child(swallow_press(
-                            waveform(
-                                "bar-wave-right",
-                                26,
-                                2.0,
-                                2.0,
-                                26.0,
-                                is_playing,
-                                meter.clone(),
-                            )
-                            .cursor_default(),
-                        ))),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_hidden()
+                                .child(swallow_press(
+                                    waveform(
+                                        "bar-wave-right",
+                                        26,
+                                        2.0,
+                                        2.0,
+                                        26.0,
+                                        is_playing,
+                                        meter.clone(),
+                                    )
+                                    .cursor_default(),
+                                )),
+                        ),
                 )
                 .child(
                     h_flex()
@@ -499,13 +505,7 @@ pub fn volume_track(
                 .h(px(size.thickness))
                 .rounded_full()
                 .bg(if is_light { red_a(0.16) } else { white(0.12) })
-                .child(
-                    div()
-                        .h_full()
-                        .rounded_full()
-                        .bg(red())
-                        .w(relative(volume)),
-                ),
+                .child(div().h_full().rounded_full().bg(red()).w(relative(volume))),
         )
         .child(
             div()

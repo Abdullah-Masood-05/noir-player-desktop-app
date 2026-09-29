@@ -421,20 +421,18 @@ fn volume_row(volume: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) ->
                     this.set_volume(next, cx);
                 })),
         )
-        .child(
-            volume_track(
-                "player-volume-track",
-                VolumeTrackSize {
-                    width: 260.0,
-                    thickness: 5.0,
-                    knob: 11.0,
-                    knob_top: 3.0,
-                },
-                volume,
-                is_light,
-                cx,
-            ),
-        )
+        .child(volume_track(
+            "player-volume-track",
+            VolumeTrackSize {
+                width: 260.0,
+                thickness: 5.0,
+                knob: 11.0,
+                knob_top: 3.0,
+            },
+            volume,
+            is_light,
+            cx,
+        ))
         .child(
             div()
                 .w(px(44.0))

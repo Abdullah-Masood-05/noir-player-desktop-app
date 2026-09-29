@@ -4,6 +4,10 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.2.1]
+
+Version 2.2.1 fixes how the updater compares versions and installs updates on Linux.
+
 ### Fixes
 
 - **Release Candidates**: The updater ignored suffixes such as `-rc1`, so a

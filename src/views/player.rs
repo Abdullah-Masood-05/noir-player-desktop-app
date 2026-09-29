@@ -1,5 +1,4 @@
 use gpui_kit::assets::IconName as MusicIcon;
-use gpui_kit::base::ElementExt;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -11,7 +10,7 @@ use crate::views::ui::{
     dynamic_text, format_duration, icon_text, img_from_image, red, red_a, smooth_scroll, waveform,
     white,
 };
-use crate::widgets::player_bar::{seek_bar, volume_icon};
+use crate::widgets::player_bar::{seek_bar, volume_icon, volume_track, VolumeTrackSize};
 
 pub fn render_player(
     model: &mut NoirPlayerModel,
@@ -405,7 +404,6 @@ fn skip_button(
 }
 
 fn volume_row(volume: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
-    let entity = cx.entity();
     let pct = (volume * 100.0).round() as u32;
 
     h_flex()
@@ -424,54 +422,18 @@ fn volume_row(volume: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) ->
                 })),
         )
         .child(
-            div()
-                .id("player-volume-track")
-                .w(px(260.0))
-                .h(px(16.0))
-                .relative()
-                .flex()
-                .items_center()
-                .cursor_pointer()
-                .on_prepaint(move |bounds, _, cx| {
-                    entity.update(cx, |this, _| this.volume_bounds = Some(bounds));
-                })
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                        let Some(bounds) = this.volume_bounds else {
-                            return;
-                        };
-                        if bounds.size.width <= px(0.0) {
-                            return;
-                        }
-                        let fraction = (event.position.x - bounds.left()) / bounds.size.width;
-                        this.set_volume(fraction.clamp(0.0, 1.0), cx);
-                    }),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .h(px(5.0))
-                        .rounded_full()
-                        .bg(if is_light { red_a(0.16) } else { white(0.12) })
-                        .child(
-                            div()
-                                .h_full()
-                                .rounded_full()
-                                .bg(red())
-                                .w(relative(volume.clamp(0.0, 1.0))),
-                        ),
-                )
-                .child(
-                    div()
-                        .absolute()
-                        .top(px(3.0))
-                        .left(relative(volume.clamp(0.0, 1.0)))
-                        .size(px(11.0))
-                        .ml(px(-5.5))
-                        .rounded_full()
-                        .bg(red()),
-                ),
+            volume_track(
+                "player-volume-track",
+                VolumeTrackSize {
+                    width: 260.0,
+                    thickness: 5.0,
+                    knob: 11.0,
+                    knob_top: 3.0,
+                },
+                volume,
+                is_light,
+                cx,
+            ),
         )
         .child(
             div()

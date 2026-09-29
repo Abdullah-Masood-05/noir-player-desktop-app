@@ -4,7 +4,7 @@ use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use crate::app::{ActiveTab, NoirPlayerModel};
+use crate::app::{NoirPlayerModel, SliderKind};
 use crate::views::library::artwork_thumb;
 use crate::views::ui::{
     bottom_aura, dynamic_border, dynamic_muted, dynamic_panel, dynamic_row_hover, dynamic_subtitle,
@@ -12,7 +12,7 @@ use crate::views::ui::{
 };
 
 /// The persistent transport bar across the bottom of the window.
-pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let is_playing = model.is_playing;
     let progress = model.progress();
@@ -22,6 +22,7 @@ pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
     let meter = model.audio_meter();
 
     h_flex()
+        .id("bar-root")
         .w_full()
         .h(px(96.0))
         .flex_shrink_0()
@@ -30,6 +31,8 @@ pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
         .px(px(16.0))
         .relative()
         .overflow_hidden()
+        .cursor_pointer()
+        .on_click(cx.listener(|this, _, _, cx| this.open_player(cx)))
         .bg(dynamic_panel(is_light))
         .border_t_1()
         .border_color(dynamic_border(is_light))
@@ -53,25 +56,31 @@ pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
                                 .flex()
                                 .justify_end()
                                 .overflow_hidden()
-                                .child(waveform(
-                                    "bar-wave-left",
-                                    26,
-                                    2.0,
-                                    2.0,
-                                    26.0,
-                                    is_playing,
-                                    meter.clone(),
+                                .child(swallow_press(
+                                    waveform(
+                                        "bar-wave-left",
+                                        26,
+                                        2.0,
+                                        2.0,
+                                        26.0,
+                                        is_playing,
+                                        meter.clone(),
+                                    )
+                                    .cursor_default(),
                                 )),
                         )
                         .child(transport(model, is_playing, has_track, is_light, cx))
-                        .child(div().flex_1().min_w_0().overflow_hidden().child(waveform(
-                            "bar-wave-right",
-                            26,
-                            2.0,
-                            2.0,
-                            26.0,
-                            is_playing,
-                            meter.clone(),
+                        .child(div().flex_1().min_w_0().overflow_hidden().child(swallow_press(
+                            waveform(
+                                "bar-wave-right",
+                                26,
+                                2.0,
+                                2.0,
+                                26.0,
+                                is_playing,
+                                meter.clone(),
+                            )
+                            .cursor_default(),
                         ))),
                 )
                 .child(
@@ -86,7 +95,13 @@ pub fn player_bar(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) ->
                                 .text_color(dynamic_muted(is_light))
                                 .child(elapsed),
                         )
-                        .child(seek_bar(progress, is_light, cx))
+                        .child(swallow_press(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .child(seek_bar(progress, is_light, cx)),
+                        ))
                         .child(
                             div()
                                 .w(px(38.0))
@@ -118,21 +133,10 @@ fn now_playing_cell(
         .gap(px(12.0))
         .child(
             h_flex()
-                .id("bar-open-player")
                 .flex_1()
                 .min_w_0()
                 .items_center()
                 .gap(px(12.0))
-                .cursor_pointer()
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if this.current.is_some() {
-                        this.active_tab = ActiveTab::Player;
-                        if this.lyrics_open {
-                            this.refresh_lyrics(cx);
-                        }
-                        cx.notify();
-                    }
-                }))
                 .children(model.now_playing().map(|track| artwork_thumb(track, 56.0)))
                 .child(
                     v_flex()
@@ -158,7 +162,7 @@ fn now_playing_cell(
                         ),
                 ),
         )
-        .child(
+        .child(swallow_press(
             div()
                 .id("bar-favourite")
                 .size(px(32.0))
@@ -179,8 +183,8 @@ fn now_playing_cell(
                     }
                 }))
                 .child(icon_text(MusicIcon::Heart, 18.0)),
-        )
-        .child(
+        ))
+        .child(swallow_press(
             div()
                 .id("bar-more")
                 .size(px(32.0))
@@ -200,7 +204,7 @@ fn now_playing_cell(
                     }
                 }))
                 .child(icon_text(MusicIcon::Ellipsis, 18.0)),
-        )
+        ))
 }
 
 fn transport(
@@ -234,7 +238,7 @@ fn transport(
                 .text_color(dynamic_text(is_light))
                 .on_click(cx.listener(|this, _, _, cx| this.prev(cx))),
         )
-        .child(
+        .child(swallow_press(
             div()
                 .id("bar-play")
                 .size(px(48.0))
@@ -260,7 +264,7 @@ fn transport(
                     },
                     24.0,
                 )),
-        )
+        ))
         .child(
             round_button("bar-next", MusicIcon::SkipForward, 20.0, 36.0, is_light)
                 .text_color(dynamic_text(is_light))
@@ -326,7 +330,7 @@ fn secondary_controls(
                             this.set_volume(next, cx);
                         })),
                 )
-                .child(volume_bar(volume, is_light, cx)),
+                .child(swallow_press(div().child(volume_bar(volume, is_light, cx)))),
         )
         .child(
             round_button("bar-queue", MusicIcon::ListMusic, 20.0, 34.0, is_light)
@@ -357,16 +361,23 @@ pub fn round_button(
     size: f32,
     is_light: bool,
 ) -> Stateful<Div> {
-    div()
-        .id(id)
-        .size(px(size))
-        .rounded_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .hover(move |s| s.bg(dynamic_row_hover(is_light)))
-        .child(icon_text(icon, icon_size))
+    swallow_press(
+        div()
+            .id(id)
+            .size(px(size))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(move |s| s.bg(dynamic_row_hover(is_light)))
+            .child(icon_text(icon, icon_size)),
+    )
+}
+
+/// Keeps a press from reaching the bar underneath, so it never counts as a bar click.
+fn swallow_press<E: InteractiveElement>(element: E) -> E {
+    element.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 
 fn labelled_button(
@@ -375,48 +386,64 @@ fn labelled_button(
     label: &'static str,
     is_light: bool,
 ) -> Stateful<Div> {
-    v_flex()
-        .id(id)
-        .px(px(10.0))
-        .py(px(4.0))
-        .gap(px(2.0))
-        .items_center()
-        .rounded_lg()
-        .cursor_pointer()
-        .text_color(dynamic_subtitle(is_light))
-        .hover(move |s| s.bg(dynamic_row_hover(is_light)))
-        .child(icon_text(icon, 18.0))
-        .child(div().text_xs().child(label))
+    swallow_press(
+        v_flex()
+            .id(id)
+            .px(px(10.0))
+            .py(px(4.0))
+            .gap(px(2.0))
+            .items_center()
+            .rounded_lg()
+            .cursor_pointer()
+            .text_color(dynamic_subtitle(is_light))
+            .hover(move |s| s.bg(dynamic_row_hover(is_light)))
+            .child(icon_text(icon, 18.0))
+            .child(div().text_xs().child(label)),
+    )
 }
 
-/// Click-to-seek scrubber with a draggable-looking knob.
-pub fn seek_bar(progress: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+/// Where a pointer x falls along a slider track, 0..=1; `None` for a zero-width track.
+pub fn slider_fraction(x: Pixels, bounds: Bounds<Pixels>) -> Option<f32> {
+    if bounds.size.width <= px(0.0) {
+        return None;
+    }
+    Some(((x - bounds.left()) / bounds.size.width).clamp(0.0, 1.0))
+}
+
+/// Hit area of a slider: records its bounds and starts a drag on press.
+pub fn slider_track(
+    id: &'static str,
+    kind: SliderKind,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Stateful<Div> {
     let entity = cx.entity();
     div()
-        .id("seek-bar")
-        .flex_1()
-        .min_w_0()
+        .id(id)
         .h(px(16.0))
         .relative()
         .flex()
         .items_center()
         .cursor_pointer()
         .on_prepaint(move |bounds, _, cx| {
-            entity.update(cx, |this, _| this.seek_bounds = Some(bounds));
+            entity.update(cx, |this, _| match kind {
+                SliderKind::Seek => this.seek_bounds = Some(bounds),
+                SliderKind::Volume => this.volume_bounds = Some(bounds),
+            });
         })
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                let Some(bounds) = this.seek_bounds else {
-                    return;
-                };
-                if bounds.size.width <= px(0.0) {
-                    return;
-                }
-                let fraction = (event.position.x - bounds.left()) / bounds.size.width;
-                this.seek_fraction(fraction, cx);
+            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                this.begin_slider_drag(kind, event.position.x, cx);
             }),
         )
+}
+
+/// Draggable scrubber; the seek is committed when the drag is released.
+pub fn seek_bar(progress: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+    slider_track("seek-bar", SliderKind::Seek, cx)
+        .flex_1()
+        .min_w_0()
         .child(
             div()
                 .w_full()
@@ -446,37 +473,30 @@ pub fn seek_bar(progress: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>
         )
 }
 
-/// Click-to-set volume slider.
-fn volume_bar(volume: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
-    let entity = cx.entity();
-    div()
-        .id("volume-bar")
-        .w(px(96.0))
-        .h(px(16.0))
-        .relative()
-        .flex()
-        .items_center()
-        .cursor_pointer()
-        .on_prepaint(move |bounds, _, cx| {
-            entity.update(cx, |this, _| this.volume_bounds = Some(bounds));
-        })
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                let Some(bounds) = this.volume_bounds else {
-                    return;
-                };
-                if bounds.size.width <= px(0.0) {
-                    return;
-                }
-                let fraction = (event.position.x - bounds.left()) / bounds.size.width;
-                this.set_volume(fraction.clamp(0.0, 1.0), cx);
-            }),
-        )
+/// Pixel sizes of a volume slider; the hit area is always 16px tall.
+#[derive(Clone, Copy)]
+pub struct VolumeTrackSize {
+    pub width: f32,
+    pub thickness: f32,
+    pub knob: f32,
+    pub knob_top: f32,
+}
+
+/// Draggable volume slider shared by the mini bar and the player screen.
+pub fn volume_track(
+    id: &'static str,
+    size: VolumeTrackSize,
+    volume: f32,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Stateful<Div> {
+    let volume = volume.clamp(0.0, 1.0);
+    slider_track(id, SliderKind::Volume, cx)
+        .w(px(size.width))
         .child(
             div()
                 .w_full()
-                .h(px(4.0))
+                .h(px(size.thickness))
                 .rounded_full()
                 .bg(if is_light { red_a(0.16) } else { white(0.12) })
                 .child(
@@ -484,17 +504,59 @@ fn volume_bar(volume: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) ->
                         .h_full()
                         .rounded_full()
                         .bg(red())
-                        .w(relative(volume.clamp(0.0, 1.0))),
+                        .w(relative(volume)),
                 ),
         )
         .child(
             div()
                 .absolute()
-                .top(px(4.0))
-                .left(relative(volume.clamp(0.0, 1.0)))
-                .size(px(10.0))
-                .ml(px(-5.0))
+                .top(px(size.knob_top))
+                .left(relative(volume))
+                .size(px(size.knob))
+                .ml(px(-size.knob / 2.0))
                 .rounded_full()
                 .bg(red()),
         )
+}
+
+fn volume_bar(volume: f32, is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Stateful<Div> {
+    let size = VolumeTrackSize {
+        width: 96.0,
+        thickness: 4.0,
+        knob: 10.0,
+        knob_top: 4.0,
+    };
+    volume_track("volume-bar", size, volume, is_light, cx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::slider_fraction;
+    use gpui_kit::{point, px, size, Bounds, Pixels};
+
+    fn bounds(left: f32, width: f32) -> Bounds<Pixels> {
+        Bounds::new(point(px(left), px(0.0)), size(px(width), px(16.0)))
+    }
+
+    #[test]
+    fn midpoint_is_half() {
+        assert_eq!(slider_fraction(px(150.0), bounds(100.0, 100.0)), Some(0.5));
+    }
+
+    #[test]
+    fn track_edges_map_to_zero_and_one() {
+        assert_eq!(slider_fraction(px(100.0), bounds(100.0, 100.0)), Some(0.0));
+        assert_eq!(slider_fraction(px(200.0), bounds(100.0, 100.0)), Some(1.0));
+    }
+
+    #[test]
+    fn positions_outside_the_track_clamp() {
+        assert_eq!(slider_fraction(px(-500.0), bounds(100.0, 100.0)), Some(0.0));
+        assert_eq!(slider_fraction(px(5000.0), bounds(100.0, 100.0)), Some(1.0));
+    }
+
+    #[test]
+    fn zero_width_track_has_no_fraction() {
+        assert_eq!(slider_fraction(px(150.0), bounds(100.0, 0.0)), None);
+    }
 }

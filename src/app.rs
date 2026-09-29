@@ -26,6 +26,49 @@ pub enum ActiveTab {
     Discover,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SliderKind {
+    Seek,
+    Volume,
+}
+
+/// What is on screen that Escape might dismiss, in priority order.
+#[derive(Clone, Copy, Debug, Default)]
+struct EscapeContext {
+    song_menu: bool,
+    update_dialog: bool,
+    equalizer: bool,
+    settings: bool,
+    on_player: bool,
+    typing: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EscapeAction {
+    CloseSongMenu,
+    CloseUpdateDialog,
+    CloseEqualizer,
+    CloseSettings,
+    LeavePlayer,
+    Nothing,
+}
+
+fn escape_action(state: EscapeContext) -> EscapeAction {
+    if state.song_menu {
+        EscapeAction::CloseSongMenu
+    } else if state.update_dialog {
+        EscapeAction::CloseUpdateDialog
+    } else if state.equalizer {
+        EscapeAction::CloseEqualizer
+    } else if state.settings {
+        EscapeAction::CloseSettings
+    } else if state.on_player && !state.typing {
+        EscapeAction::LeavePlayer
+    } else {
+        EscapeAction::Nothing
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LibraryTab {
     Music,
@@ -255,6 +298,9 @@ pub struct NoirPlayerModel {
     pub seek_bounds: Option<Bounds<Pixels>>,
     /// Laid-out bounds of the volume slider track.
     pub volume_bounds: Option<Bounds<Pixels>>,
+    pub slider_drag: Option<SliderKind>,
+    /// Scrub position shown while the seek bar is dragged; the seek happens on release.
+    pub seek_preview: Option<f32>,
     pub settings_open: bool,
     pub equalizer_open: bool,
     pub root_focus_handle: FocusHandle,
@@ -395,6 +441,8 @@ impl NoirPlayerModel {
             lyrics_path: None,
             seek_bounds: None,
             volume_bounds: None,
+            slider_drag: None,
+            seek_preview: None,
             settings_open: false,
             equalizer_open: false,
             root_focus_handle: cx.focus_handle(),
@@ -914,6 +962,7 @@ impl NoirPlayerModel {
         self.current =
             current_path.and_then(|path| self.tracks.iter().position(|track| track.path == path));
         if self.current.is_none() {
+            self.cancel_seek_drag();
             self.is_playing = false;
             if let Some(player) = self.player.as_mut() {
                 player.stop();
@@ -1128,6 +1177,18 @@ impl NoirPlayerModel {
         cx.notify();
     }
 
+    /// Shows the full player screen; does nothing until a song is loaded.
+    pub fn open_player(&mut self, cx: &mut Context<Self>) {
+        if self.current.is_none() {
+            return;
+        }
+        self.active_tab = ActiveTab::Player;
+        if self.lyrics_open {
+            self.refresh_lyrics(cx);
+        }
+        cx.notify();
+    }
+
     pub fn set_sort_mode(&mut self, mode: SortMode, cx: &mut Context<Self>) {
         self.sort_mode = mode;
         self.sort_menu_open = false;
@@ -1212,6 +1273,67 @@ impl NoirPlayerModel {
             self.error = Some(format!("{error:#}"));
         }
         cx.notify();
+    }
+
+    pub fn begin_slider_drag(&mut self, kind: SliderKind, x: Pixels, cx: &mut Context<Self>) {
+        if kind == SliderKind::Seek && !self.can_seek() {
+            return;
+        }
+        self.slider_drag = Some(kind);
+        self.drag_slider_to(x, cx);
+    }
+
+    fn can_seek(&self) -> bool {
+        self.player
+            .as_ref()
+            .and_then(MediaPlayer::duration)
+            .is_some_and(|total| !total.is_zero())
+    }
+
+    pub fn drag_slider_to(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let Some(kind) = self.slider_drag else {
+            return;
+        };
+        let bounds = match kind {
+            SliderKind::Seek => self.seek_bounds,
+            SliderKind::Volume => self.volume_bounds,
+        };
+        let Some(fraction) = bounds.and_then(|bounds| player_bar::slider_fraction(x, bounds))
+        else {
+            return;
+        };
+        match kind {
+            SliderKind::Seek => {
+                if self.seek_preview != Some(fraction) {
+                    self.seek_preview = Some(fraction);
+                    cx.notify();
+                }
+            }
+            SliderKind::Volume => self.set_volume(fraction, cx),
+        }
+    }
+
+    /// Ends a slider drag; a seek drag commits its single seek here.
+    pub fn end_slider_drag(&mut self, x: Option<Pixels>, cx: &mut Context<Self>) {
+        if self.slider_drag.is_none() {
+            return;
+        }
+        if let Some(x) = x {
+            self.drag_slider_to(x, cx);
+        }
+        let kind = self.slider_drag.take();
+        let preview = self.seek_preview.take();
+        if let (Some(SliderKind::Seek), Some(fraction)) = (kind, preview) {
+            self.seek_fraction(fraction, cx);
+        }
+        cx.notify();
+    }
+
+    fn cancel_seek_drag(&mut self) {
+        if self.slider_drag == Some(SliderKind::Seek) {
+            self.slider_drag = None;
+        }
+        self.seek_preview = None;
     }
 
     pub fn toggle_lyrics(&mut self, cx: &mut Context<Self>) {
@@ -1814,6 +1936,7 @@ impl NoirPlayerModel {
             }
         }
         if self.is_playing && self.player.as_ref().is_some_and(MediaPlayer::is_finished) {
+            self.cancel_seek_drag();
             self.next(cx);
             dirty = true;
         }
@@ -1855,6 +1978,7 @@ impl NoirPlayerModel {
         if let Some(player) = self.player.as_ref() {
             player.set_volume(self.volume);
         }
+        self.cancel_seek_drag();
         self.current = Some(index);
         self.is_playing = false;
         cx.notify();
@@ -1895,6 +2019,7 @@ impl NoirPlayerModel {
                     player.set_volume(self.volume);
                     player.play();
                 }
+                self.cancel_seek_drag();
                 self.current = Some(index);
                 self.is_playing = true;
                 self.error = None;
@@ -1987,6 +2112,9 @@ impl NoirPlayerModel {
     }
 
     pub fn progress(&self) -> f32 {
+        if let Some(preview) = self.seek_preview {
+            return preview.clamp(0.0, 1.0);
+        }
         match (self.current, self.player.as_ref()) {
             (Some(_), Some(player)) => {
                 let total = player.duration().unwrap_or(Duration::from_secs(1));
@@ -2004,10 +2132,12 @@ impl NoirPlayerModel {
         match self.player.as_ref() {
             Some(player) => {
                 let fmt = |d: Duration| format!("{}:{:02}", d.as_secs() / 60, d.as_secs() % 60);
-                (
-                    fmt(player.position()),
-                    fmt(player.duration().unwrap_or_default()),
-                )
+                let total = player.duration().unwrap_or_default();
+                let elapsed = match self.seek_preview {
+                    Some(preview) => total.mul_f32(preview.clamp(0.0, 1.0)),
+                    None => player.position(),
+                };
+                (fmt(elapsed), fmt(total))
             }
             None => ("0:00".to_string(), "0:00".to_string()),
         }
@@ -2115,9 +2245,11 @@ impl Render for NoirPlayerModel {
                 .read(cx)
                 .focus_handle(cx)
                 .is_focused(window);
-            if !lib_search_focused
-                && !disc_search_focused
-                && !self.root_focus_handle.is_focused(window)
+            // The search boxes are not on the player screen, so focus left in one
+            // would swallow Escape and the playback keys there.
+            let search_keeps_focus =
+                active_tab != ActiveTab::Player && (lib_search_focused || disc_search_focused);
+            if !search_keeps_focus && !self.root_focus_handle.is_focused(window)
             {
                 window.focus(&self.root_focus_handle, cx);
             }
@@ -2161,18 +2293,29 @@ impl Render for NoirPlayerModel {
                 let alt = event.keystroke.modifiers.alt;
 
                 if k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc") {
-                    if this.song_menu.is_some() {
-                        this.close_song_menu(cx);
-                        cx.stop_propagation();
-                    } else if this.update_dialog_open {
-                        this.update_dialog_open = false;
-                        cx.notify();
-                        cx.stop_propagation();
-                    } else if this.equalizer_open {
-                        this.close_equalizer(cx);
-                        cx.stop_propagation();
-                    } else if this.settings_open {
-                        this.close_settings(cx);
+                    let action = escape_action(EscapeContext {
+                        song_menu: this.song_menu.is_some(),
+                        update_dialog: this.update_dialog_open,
+                        equalizer: this.equalizer_open,
+                        settings: this.settings_open,
+                        on_player: this.active_tab == ActiveTab::Player,
+                        typing: is_typing,
+                    });
+                    match action {
+                        EscapeAction::CloseSongMenu => this.close_song_menu(cx),
+                        EscapeAction::CloseUpdateDialog => {
+                            this.update_dialog_open = false;
+                            cx.notify();
+                        }
+                        EscapeAction::CloseEqualizer => this.close_equalizer(cx),
+                        EscapeAction::CloseSettings => this.close_settings(cx),
+                        EscapeAction::LeavePlayer => {
+                            this.active_tab = ActiveTab::Library;
+                            cx.notify();
+                        }
+                        EscapeAction::Nothing => {}
+                    }
+                    if action != EscapeAction::Nothing {
                         cx.stop_propagation();
                     }
                 } else if ctrl_or_cmd && (k == "," || k.eq_ignore_ascii_case("comma")) {
@@ -2311,7 +2454,45 @@ impl Render for NoirPlayerModel {
             .when(show_volume_hud, |d| {
                 d.child(volume_hud(self.volume, is_light))
             })
+            .child(slider_drag_listener(cx.entity()))
     }
+}
+
+/// Window-level mouse listeners that carry a slider drag past the track's own
+/// bounds; a move with the left button up (released off-window) ends it.
+fn slider_drag_listener(entity: Entity<NoirPlayerModel>) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |_, _, window, _| {
+            let moves = entity.clone();
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase != DispatchPhase::Capture {
+                    return;
+                }
+                moves.update(cx, |this, cx| {
+                    if this.slider_drag.is_none() {
+                        return;
+                    }
+                    if event.pressed_button == Some(MouseButton::Left) {
+                        this.drag_slider_to(event.position.x, cx);
+                    } else {
+                        this.end_slider_drag(None, cx);
+                    }
+                });
+            });
+            let releases = entity.clone();
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                    return;
+                }
+                releases.update(cx, |this, cx| {
+                    this.end_slider_drag(Some(event.position.x), cx);
+                });
+            });
+        },
+    )
+    .absolute()
+    .size(px(0.0))
 }
 
 fn c(hex: u32) -> Hsla {
@@ -2388,4 +2569,76 @@ fn volume_hud(volume: f32, is_light: bool) -> Div {
                         .child(format!("{pct}%")),
                 ),
         )
+}
+
+#[cfg(test)]
+mod escape_tests {
+    use super::{EscapeAction, EscapeContext, escape_action};
+
+    fn on_player() -> EscapeContext {
+        EscapeContext {
+            on_player: true,
+            ..EscapeContext::default()
+        }
+    }
+
+    #[test]
+    fn escape_leaves_the_player_when_nothing_else_is_open() {
+        assert_eq!(escape_action(on_player()), EscapeAction::LeavePlayer);
+    }
+
+    #[test]
+    fn escape_does_nothing_off_the_player_screen() {
+        assert_eq!(
+            escape_action(EscapeContext::default()),
+            EscapeAction::Nothing
+        );
+    }
+
+    #[test]
+    fn escape_does_not_leave_the_player_while_typing() {
+        let state = EscapeContext {
+            typing: true,
+            ..on_player()
+        };
+        assert_eq!(escape_action(state), EscapeAction::Nothing);
+    }
+
+    #[test]
+    fn overlays_close_before_the_player_and_in_priority_order() {
+        let mut state = EscapeContext {
+            song_menu: true,
+            update_dialog: true,
+            equalizer: true,
+            settings: true,
+            ..on_player()
+        };
+        let expected = [
+            EscapeAction::CloseSongMenu,
+            EscapeAction::CloseUpdateDialog,
+            EscapeAction::CloseEqualizer,
+            EscapeAction::CloseSettings,
+            EscapeAction::LeavePlayer,
+        ];
+        for action in expected {
+            assert_eq!(escape_action(state), action);
+            match action {
+                EscapeAction::CloseSongMenu => state.song_menu = false,
+                EscapeAction::CloseUpdateDialog => state.update_dialog = false,
+                EscapeAction::CloseEqualizer => state.equalizer = false,
+                EscapeAction::CloseSettings => state.settings = false,
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn typing_in_settings_search_still_closes_settings() {
+        let state = EscapeContext {
+            settings: true,
+            typing: true,
+            ..EscapeContext::default()
+        };
+        assert_eq!(escape_action(state), EscapeAction::CloseSettings);
+    }
 }

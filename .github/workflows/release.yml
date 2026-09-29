@@ -227,13 +227,26 @@ jobs:
           staged_app = staging / 'Noir Player.app'
           subprocess.run(['cp', '-r', str(app), str(staged_app)], check=True)
           (staging / 'Applications').symlink_to('/Applications')
-          subprocess.run([
-              'hdiutil', 'create',
-              '-volname', 'Noir Player',
-              '-srcfolder', str(staging),
-              '-ov', '-format', 'UDZO',
-              str(dmg),
-          ], check=True)
+          # hdiutil create intermittently fails with "Resource busy" on hosted
+          # runners, so retry a few times and still fail if it never succeeds.
+          import time
+          attempts = 5
+          for attempt in range(1, attempts + 1):
+              result = subprocess.run([
+                  'hdiutil', 'create',
+                  '-volname', 'Noir Player',
+                  '-srcfolder', str(staging),
+                  '-ov', '-format', 'UDZO',
+                  str(dmg),
+              ])
+              if result.returncode == 0:
+                  break
+              print(f'hdiutil create failed on attempt {attempt}/{attempts} with return code {result.returncode}')
+              dmg.unlink(missing_ok=True)
+              if attempt == attempts:
+                  raise subprocess.CalledProcessError(result.returncode, result.args)
+              subprocess.run(['hdiutil', 'detach', '/Volumes/Noir Player', '-force'])
+              time.sleep(5 * attempt)
           assert dmg.exists() and dmg.stat().st_size > 0
           info = subprocess.check_output(['hdiutil', 'imageinfo', '-plist', str(dmg)], text=True)
           assert 'UDZO' in info

@@ -4,6 +4,22 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.3.0]
+
+Version 2.3.0 makes the miniplayer and the player screen easier to control.
+
+### Highlights & New Features
+
+- **Click the Miniplayer to Open the Player**: Click anywhere on the bar along
+  the bottom of the window to open the full player screen. Its buttons, the
+  waveforms and the sliders keep doing their own jobs.
+- **Draggable Progress and Volume Bars**: Drag the progress bar and the volume
+  bar on both the miniplayer and the player screen, and keep dragging even
+  when the pointer leaves the bar. Volume changes as you drag; the song jumps
+  to the new position when you let go.
+- **Escape Returns Home**: Press Escape on the player screen to go back to
+  your library. Open menus and dialogs still close first.
+
 ## [2.2.1]
 
 Version 2.2.1 fixes how the updater compares versions and installs updates on Linux.

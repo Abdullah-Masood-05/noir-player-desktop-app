@@ -1,0 +1,4 @@
+# Exclude the Vercel serverless backend from GitHub language statistics.
+# The repo is a Rust project; backend/ is a small support helper and should
+# not inflate the TypeScript/JavaScript percentage on the language bar.
+backend/** linguist-vendored=true

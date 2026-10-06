@@ -4,6 +4,15 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.3.1]
+
+Version 2.3.1 remembers your shuffle and repeat settings.
+
+### Fixes
+
+- **Shuffle and Repeat Are Remembered**: Shuffle and Repeat stay the way you
+  left them when you close and reopen Noir Player. Both start off.
+
 ## [2.3.0]
 
 Version 2.3.0 makes the miniplayer and the player screen easier to control.

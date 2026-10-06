@@ -220,8 +220,8 @@ fn transport(
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
 ) -> Div {
-    let shuffle = model.shuffle;
-    let repeat_all = model.repeat_all;
+    let shuffle = model.store.shuffle;
+    let repeat_all = model.store.repeat_all;
 
     h_flex()
         .flex_shrink_0()
@@ -234,10 +234,7 @@ fn transport(
                 } else {
                     dynamic_subtitle(is_light)
                 })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.shuffle = !this.shuffle;
-                    cx.notify();
-                })),
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_shuffle(cx))),
         )
         .child(
             round_button("bar-prev", MusicIcon::SkipBack, 20.0, 36.0, is_light)
@@ -283,10 +280,7 @@ fn transport(
                 } else {
                     dynamic_subtitle(is_light)
                 })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.repeat_all = !this.repeat_all;
-                    cx.notify();
-                })),
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_repeat(cx))),
         )
 }
 

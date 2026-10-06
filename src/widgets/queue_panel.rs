@@ -16,7 +16,7 @@ pub const QUEUE_WIDTH: f32 = 302.0;
 pub fn queue_panel(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let upcoming = model.upcoming_queue();
-    let shuffle = model.shuffle;
+    let shuffle = model.store.shuffle;
 
     v_flex()
         .w(px(QUEUE_WIDTH))
@@ -51,10 +51,7 @@ pub fn queue_panel(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -
                                 "queue-shuffle",
                                 MusicIcon::Shuffle,
                                 is_light,
-                                cx.listener(|this, _, _, cx| {
-                                    this.shuffle = !this.shuffle;
-                                    cx.notify();
-                                }),
+                                cx.listener(|this, _, _, cx| this.toggle_shuffle(cx)),
                             )
                             .when(shuffle, |d| d.text_color(red())),
                         )

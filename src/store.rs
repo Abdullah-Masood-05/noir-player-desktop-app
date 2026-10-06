@@ -46,6 +46,10 @@ pub struct Store {
     pub youtube_api_key: String,
     #[serde(default)]
     pub rapidapi_key: String,
+    #[serde(default)]
+    pub shuffle: bool,
+    #[serde(default)]
+    pub repeat_all: bool,
 }
 
 fn default_seek_interval() -> u32 {
@@ -96,6 +100,8 @@ impl Default for Store {
             lastfm_api_key: String::new(),
             youtube_api_key: String::new(),
             rapidapi_key: String::new(),
+            shuffle: false,
+            repeat_all: false,
         }
     }
 }
@@ -493,5 +499,33 @@ mod tests {
         };
         saved.save(&path).unwrap();
         assert_eq!(Store::load(&path).unwrap(), saved);
+    }
+
+    #[test]
+    fn shuffle_and_repeat_survive_a_save() {
+        let temp = TempDir::new();
+        let path = temp.0.join("playback.json");
+        for (shuffle, repeat_all) in [(true, false), (false, true), (true, true), (false, false)] {
+            let saved = Store {
+                shuffle,
+                repeat_all,
+                ..Store::default()
+            };
+            saved.save(&path).unwrap();
+            let loaded = Store::load(&path).unwrap();
+            assert_eq!(loaded.shuffle, shuffle);
+            assert_eq!(loaded.repeat_all, repeat_all);
+        }
+    }
+
+    #[test]
+    fn older_store_and_fresh_install_start_with_shuffle_and_repeat_off() {
+        let older: Store = serde_json::from_str(r#"{"playlists":[],"favourites":[]}"#).unwrap();
+        assert!(!older.shuffle);
+        assert!(!older.repeat_all);
+        let temp = TempDir::new();
+        let fresh = Store::load(&temp.0.join("missing.json")).unwrap();
+        assert!(!fresh.shuffle);
+        assert!(!fresh.repeat_all);
     }
 }

@@ -271,8 +271,6 @@ pub struct NoirPlayerModel {
     pub status: SharedString,
     pub scanning: bool,
     pub volume: f32,
-    pub shuffle: bool,
-    pub repeat_all: bool,
     pub discover_search: Entity<InputState>,
     pub discover_tracks: Vec<crate::api::Track>,
     pub discover_loading: bool,
@@ -417,8 +415,6 @@ impl NoirPlayerModel {
             volume,
             volume_hud_until: None,
             volume_settling: false,
-            shuffle: false,
-            repeat_all: true,
             discover_search,
             discover_tracks: Vec::new(),
             discover_loading: false,
@@ -1207,6 +1203,16 @@ impl NoirPlayerModel {
             self.media_menu_open = false;
             cx.notify();
         }
+    }
+
+    pub fn toggle_shuffle(&mut self, cx: &mut Context<Self>) {
+        self.store.shuffle = !self.store.shuffle;
+        self.save_current_store(cx);
+    }
+
+    pub fn toggle_repeat(&mut self, cx: &mut Context<Self>) {
+        self.store.repeat_all = !self.store.repeat_all;
+        self.save_current_store(cx);
     }
 
     pub fn toggle_queue_panel(&mut self, cx: &mut Context<Self>) {
@@ -2066,7 +2072,7 @@ impl NoirPlayerModel {
         else {
             return;
         };
-        let next = if self.shuffle && self.queue.len() > 1 {
+        let next = if self.store.shuffle && self.queue.len() > 1 {
             let seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -2074,7 +2080,7 @@ impl NoirPlayerModel {
             (position + 1 + seed % (self.queue.len() - 1)) % self.queue.len()
         } else if position + 1 < self.queue.len() {
             position + 1
-        } else if self.repeat_all {
+        } else if self.store.repeat_all {
             0
         } else {
             self.is_playing = false;
@@ -2101,7 +2107,7 @@ impl NoirPlayerModel {
         else {
             return;
         };
-        let previous = if position == 0 && self.repeat_all {
+        let previous = if position == 0 && self.store.repeat_all {
             self.queue.len().saturating_sub(1)
         } else {
             position.saturating_sub(1)

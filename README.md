@@ -4,7 +4,11 @@
 [![Release](https://img.shields.io/github/v/release/Abdullah-Masood-05/noir-player-desktop-app)](https://github.com/Abdullah-Masood-05/noir-player-desktop-app/releases)
 [![Rust](https://img.shields.io/badge/built_with-Rust-dea584?logo=rust)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/Abdullah-Masood-05/noir-player-desktop-app/total?color=brightgreen)](https://github.com/Abdullah-Masood-05/noir-player-desktop-app/releases)
+[![Stars](https://img.shields.io/github/stars/Abdullah-Masood-05/noir-player-desktop-app?style=flat&logo=github&color=E53935)](https://github.com/Abdullah-Masood-05/noir-player-desktop-app/stargazers)
 [![Build targets](https://img.shields.io/badge/build_targets-Windows%20%7C%20macOS%20%7C%20Linux-555)](#packaging-and-releases)
+
+> ⭐ **Enjoying Noir Player?** If it's useful to you, please [star it on GitHub](https://github.com/Abdullah-Masood-05/noir-player-desktop-app). It's free and it helps other people find it.
 
 This is the desktop version of [NoirPlayer for Android](https://github.com/Abdullah-Masood-05/NoirPlayer), rebuilt in Rust with GPUI Kit. The window is laid out for a desktop: a navigation rail on the left, the song list in the middle, a queue you can dock on the right, and a transport bar along the bottom. It keeps the red-on-black look of the mobile app, has a light theme for daylight, and adds multi-folder library scanning, a 5-band graphic equalizer and Discover.
 

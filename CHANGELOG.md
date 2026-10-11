@@ -4,6 +4,17 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.3.2]
+
+Version 2.3.2 makes Noir Player start on more Windows PCs.
+
+### Fixes
+
+- **Starts Without the Visual C++ Redistributable**: Noir Player now starts on
+  Windows PCs that don't have the Microsoft Visual C++ Redistributable
+  installed. Previously some of them showed "VCRUNTIME140.dll was not found".
+  There is nothing extra to install.
+
 ## [2.3.1]
 
 Version 2.3.1 remembers your shuffle and repeat settings.

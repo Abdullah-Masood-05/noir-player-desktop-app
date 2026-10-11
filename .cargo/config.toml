@@ -1,7 +1,13 @@
 [build]
 
+# Statically link the MSVC C runtime so the binaries run on a clean Windows
+# install without the Visual C++ Redistributable (VCRUNTIME140.dll).
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
 
 [alias]
 installer = "run --release --locked --features installer --bin windows_installer --"

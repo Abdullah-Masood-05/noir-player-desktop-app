@@ -118,6 +118,11 @@ jobs:
           cache-on-failure: false
       - name: Build locked release binary
         run: cargo build --release --locked --target "$TARGET"
+      # Users without the Visual C++ Redistributable got "VCRUNTIME140.dll was
+      # not found"; the exe must link the CRT statically (+crt-static).
+      - name: Verify release exe does not import the dynamic MSVC runtime
+        if: runner.os == 'Windows'
+        run: python .github/workflows/scripts/check_static_crt.py --exe "target/$TARGET/release/noir_player.exe"
       - name: Install pinned cargo-bundle and prepare offline metadata
         if: runner.os != 'Windows'
         run: |
@@ -152,6 +157,13 @@ jobs:
               shutil.copyfile(installer, destination)
               assert destination.stat().st_size == installer.stat().st_size
           PY
+      - name: Verify packaged exe does not import the dynamic MSVC runtime
+        if: runner.os == 'Windows'
+        run: |
+          python .github/workflows/scripts/check_static_crt.py \
+            --expect "target/$TARGET/release/noir_player.exe" \
+            --msi "dist/noir-player-$VERSION-windows-x64.msi" \
+            --nsis "dist/noir-player-$VERSION-windows-x64-setup.exe"
       - name: Bundle macOS application
         if: runner.os == 'macOS'
         env:

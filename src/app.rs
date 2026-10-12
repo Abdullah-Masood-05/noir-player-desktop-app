@@ -16,7 +16,7 @@ use crate::widgets::{player_bar, queue_panel, sidebar};
 #[path = "store.rs"]
 pub mod store;
 
-use store::Store;
+use store::{RepeatMode, Store};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ActiveTab {
@@ -1210,8 +1210,9 @@ impl NoirPlayerModel {
         self.save_current_store(cx);
     }
 
-    pub fn toggle_repeat(&mut self, cx: &mut Context<Self>) {
-        self.store.repeat_all = !self.store.repeat_all;
+    /// Repeat button: Off -> All -> One -> Off.
+    pub fn cycle_repeat(&mut self, cx: &mut Context<Self>) {
+        self.store.repeat = self.store.repeat.cycle();
         self.save_current_store(cx);
     }
 
@@ -1943,7 +1944,7 @@ impl NoirPlayerModel {
         }
         if self.is_playing && self.player.as_ref().is_some_and(MediaPlayer::is_finished) {
             self.cancel_seek_drag();
-            self.next(cx);
+            self.track_finished(cx);
             dirty = true;
         }
         // The scrubber / time labels only move while audio is actually playing.
@@ -2065,49 +2066,99 @@ impl NoirPlayerModel {
         }
     }
 
-    pub fn next(&mut self, cx: &mut Context<Self>) {
-        let Some(position) = self
-            .current
-            .and_then(|index| self.queue.iter().position(|&queued| queued == index))
-        else {
-            return;
-        };
-        let next = if self.store.shuffle && self.queue.len() > 1 {
-            let seed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .subsec_nanos() as usize;
-            (position + 1 + seed % (self.queue.len() - 1)) % self.queue.len()
-        } else if position + 1 < self.queue.len() {
-            position + 1
-        } else if self.store.repeat_all {
-            0
-        } else {
-            self.is_playing = false;
-            if let Some(player) = self.player.as_ref() {
-                player.pause();
-            }
-            cx.notify();
-            return;
-        };
-        if let Some(&index) = self.queue.get(next) {
-            if !self.load_index(index, cx) {
-                self.is_playing = false;
-                if let Some(player) = self.player.as_ref() {
-                    player.pause();
+    /// The playing song ran to its end on its own (not a Next press).
+    fn track_finished(&mut self, cx: &mut Context<Self>) {
+        let action = finished_action(
+            self.store.repeat,
+            self.queue_position(),
+            self.queue.len(),
+            self.store.shuffle,
+            shuffle_seed(),
+        );
+        match action {
+            FinishedAction::Stop => self.stop_at_start(cx),
+            FinishedAction::Replay => {
+                if !self.restart_current(cx) {
+                    self.stop_playback(cx);
                 }
+            }
+            FinishedAction::Play(position) => self.play_queue_position(position, cx),
+        }
+    }
+
+    /// Repeat Off: rewinds the finished song and leaves it paused at 0:00, so
+    /// Play starts it again and the seek bar keeps working.
+    fn stop_at_start(&mut self, cx: &mut Context<Self>) {
+        let cued = match self.current {
+            Some(index) => self.cue_index(index, cx),
+            None => false,
+        };
+        if !cued {
+            self.stop_playback(cx);
+        }
+    }
+
+    /// Repeat One: reloads the same song from the start. Unlike `load_index`
+    /// it leaves Recently played (the song is already at the top) and lyrics
+    /// alone, and `current` never changes, so the cover art stays put.
+    fn restart_current(&mut self, cx: &mut Context<Self>) -> bool {
+        let loaded = match (
+            self.current.and_then(|index| self.tracks.get(index)),
+            self.player.as_mut(),
+        ) {
+            (Some(track), Some(player)) => player.load(&track.path).is_ok(),
+            _ => false,
+        };
+        if !loaded {
+            return false;
+        }
+        if let Some(player) = self.player.as_ref() {
+            player.set_volume(self.volume);
+            player.play();
+        }
+        self.cancel_seek_drag();
+        self.is_playing = true;
+        cx.notify();
+        true
+    }
+
+    fn stop_playback(&mut self, cx: &mut Context<Self>) {
+        self.is_playing = false;
+        if let Some(player) = self.player.as_ref() {
+            player.pause();
+        }
+        cx.notify();
+    }
+
+    fn play_queue_position(&mut self, position: usize, cx: &mut Context<Self>) {
+        if let Some(&index) = self.queue.get(position) {
+            if !self.load_index(index, cx) {
+                self.stop_playback(cx);
             }
         }
     }
 
-    pub fn prev(&mut self, cx: &mut Context<Self>) {
-        let Some(position) = self
-            .current
-            .and_then(|index| self.queue.iter().position(|&queued| queued == index))
-        else {
+    pub fn next(&mut self, cx: &mut Context<Self>) {
+        let Some(position) = self.queue_position() else {
             return;
         };
-        let previous = if position == 0 && self.store.repeat_all {
+        match next_position(
+            position,
+            self.queue.len(),
+            self.store.shuffle,
+            self.store.repeat == RepeatMode::All,
+            shuffle_seed(),
+        ) {
+            Some(next) => self.play_queue_position(next, cx),
+            None => self.stop_playback(cx),
+        }
+    }
+
+    pub fn prev(&mut self, cx: &mut Context<Self>) {
+        let Some(position) = self.queue_position() else {
+            return;
+        };
+        let previous = if position == 0 && self.store.repeat == RepeatMode::All {
             self.queue.len().saturating_sub(1)
         } else {
             position.saturating_sub(1)
@@ -2574,6 +2625,128 @@ fn volume_hud(volume: f32, is_light: bool) -> Div {
                         .child(format!("{pct}%")),
                 ),
         )
+}
+
+fn shuffle_seed() -> usize {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos() as usize
+}
+
+/// Queue position after `position`: a random other song when shuffling,
+/// otherwise the next one, wrapping to the start only when `wrap` is set.
+/// `None` means the end of the queue was reached.
+fn next_position(
+    position: usize,
+    len: usize,
+    shuffle: bool,
+    wrap: bool,
+    seed: usize,
+) -> Option<usize> {
+    if shuffle && len > 1 {
+        Some((position + 1 + seed % (len - 1)) % len)
+    } else if position + 1 < len {
+        Some(position + 1)
+    } else if wrap && len > 0 {
+        Some(0)
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FinishedAction {
+    /// Stay on the finished song, paused.
+    Stop,
+    /// Play the finished song again from the start.
+    Replay,
+    /// Play the song at this queue position.
+    Play(usize),
+}
+
+/// What to do when the song at queue `position` finishes by itself.
+fn finished_action(
+    mode: RepeatMode,
+    position: Option<usize>,
+    len: usize,
+    shuffle: bool,
+    seed: usize,
+) -> FinishedAction {
+    match mode {
+        RepeatMode::Off => FinishedAction::Stop,
+        RepeatMode::One => FinishedAction::Replay,
+        RepeatMode::All => {
+            match position.and_then(|position| next_position(position, len, shuffle, true, seed)) {
+                Some(next) if Some(next) == position => FinishedAction::Replay,
+                Some(next) => FinishedAction::Play(next),
+                None => FinishedAction::Stop,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod repeat_tests {
+    use super::{finished_action, next_position, FinishedAction, RepeatMode};
+
+    #[test]
+    fn repeat_off_stops_when_a_song_ends_anywhere_in_the_queue() {
+        for position in [Some(0), Some(2), Some(4), None] {
+            for shuffle in [false, true] {
+                assert_eq!(
+                    finished_action(RepeatMode::Off, position, 5, shuffle, 7),
+                    FinishedAction::Stop
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn repeat_one_replays_the_same_song() {
+        for position in [Some(0), Some(4), None] {
+            for shuffle in [false, true] {
+                assert_eq!(
+                    finished_action(RepeatMode::One, position, 5, shuffle, 3),
+                    FinishedAction::Replay
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn repeat_all_advances_and_wraps_at_the_end() {
+        let all = |position, len| finished_action(RepeatMode::All, Some(position), len, false, 0);
+        assert_eq!(all(0, 5), FinishedAction::Play(1));
+        assert_eq!(all(3, 5), FinishedAction::Play(4));
+        assert_eq!(all(4, 5), FinishedAction::Play(0));
+        // A queue of one simply plays that song again.
+        assert_eq!(all(0, 1), FinishedAction::Replay);
+        assert_eq!(
+            finished_action(RepeatMode::All, None, 5, false, 0),
+            FinishedAction::Stop
+        );
+    }
+
+    #[test]
+    fn repeat_all_with_shuffle_picks_a_different_song() {
+        for seed in 0..20 {
+            for position in 0..4 {
+                match finished_action(RepeatMode::All, Some(position), 4, true, seed) {
+                    FinishedAction::Play(next) => assert!(next != position && next < 4),
+                    other => panic!("expected another song, got {other:?}"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn manual_next_stops_at_the_end_unless_wrapping() {
+        assert_eq!(next_position(1, 3, false, false, 0), Some(2));
+        assert_eq!(next_position(2, 3, false, false, 0), None);
+        assert_eq!(next_position(2, 3, false, true, 0), Some(0));
+        assert_eq!(next_position(0, 0, false, true, 0), None);
+    }
 }
 
 #[cfg(test)]

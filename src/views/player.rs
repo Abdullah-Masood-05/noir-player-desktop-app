@@ -10,7 +10,9 @@ use crate::views::ui::{
     dynamic_text, format_duration, icon_text, img_from_image, red, red_a, smooth_scroll, waveform,
     white,
 };
-use crate::widgets::player_bar::{seek_bar, volume_icon, volume_track, VolumeTrackSize};
+use crate::widgets::player_bar::{
+    repeat_icon, seek_bar, volume_icon, volume_track, VolumeTrackSize,
+};
 
 pub fn render_player(
     model: &mut NoirPlayerModel,
@@ -271,7 +273,7 @@ fn transport(
     cx: &mut Context<NoirPlayerModel>,
 ) -> Div {
     let shuffle = model.store.shuffle;
-    let repeat_all = model.store.repeat_all;
+    let repeat = model.store.repeat;
     let interval = model.store.seek_interval_seconds;
 
     h_flex()
@@ -338,13 +340,13 @@ fn transport(
                 .on_click(cx.listener(|this, _, _, cx| this.next(cx))),
         )
         .child(
-            control("player-repeat", MusicIcon::Repeat, 20.0, 40.0, is_light)
-                .text_color(if repeat_all {
+            control("player-repeat", repeat_icon(repeat), 20.0, 40.0, is_light)
+                .text_color(if repeat.is_active() {
                     red()
                 } else {
                     dynamic_subtitle(is_light)
                 })
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_repeat(cx))),
+                .on_click(cx.listener(|this, _, _, cx| this.cycle_repeat(cx))),
         )
 }
 

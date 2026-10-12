@@ -48,8 +48,59 @@ pub struct Store {
     pub rapidapi_key: String,
     #[serde(default)]
     pub shuffle: bool,
-    #[serde(default)]
-    pub repeat_all: bool,
+    /// Older builds stored a plain `repeat_all` flag; it is still read
+    /// (true = All, false = Off) but only `repeat` is ever written.
+    #[serde(default, alias = "repeat_all", deserialize_with = "deserialize_repeat")]
+    pub repeat: RepeatMode,
+}
+
+/// What happens when a song finishes on its own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RepeatMode {
+    /// Stop when the song ends.
+    #[default]
+    Off,
+    /// Play the next song, wrapping from the end of the queue to the start.
+    All,
+    /// Play the same song again.
+    One,
+}
+
+impl RepeatMode {
+    /// The mode after a click on the repeat button: Off -> All -> One -> Off.
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Off => Self::All,
+            Self::All => Self::One,
+            Self::One => Self::Off,
+        }
+    }
+
+    pub fn is_active(self) -> bool {
+        self != Self::Off
+    }
+}
+
+/// Accepts the current lowercase mode names and the legacy `repeat_all`
+/// boolean. Anything unrecognised (a mode from a newer build, say) falls back
+/// to Off instead of rejecting the whole settings file.
+fn deserialize_repeat<'de, D>(deserializer: D) -> Result<RepeatMode, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Legacy(bool),
+        Mode(RepeatMode),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Stored::deserialize(deserializer)? {
+        Stored::Legacy(true) => RepeatMode::All,
+        Stored::Mode(mode) => mode,
+        Stored::Legacy(false) | Stored::Other(_) => RepeatMode::Off,
+    })
 }
 
 fn default_seek_interval() -> u32 {
@@ -101,7 +152,7 @@ impl Default for Store {
             youtube_api_key: String::new(),
             rapidapi_key: String::new(),
             shuffle: false,
-            repeat_all: false,
+            repeat: RepeatMode::Off,
         }
     }
 }
@@ -505,27 +556,67 @@ mod tests {
     fn shuffle_and_repeat_survive_a_save() {
         let temp = TempDir::new();
         let path = temp.0.join("playback.json");
-        for (shuffle, repeat_all) in [(true, false), (false, true), (true, true), (false, false)] {
-            let saved = Store {
-                shuffle,
-                repeat_all,
-                ..Store::default()
-            };
-            saved.save(&path).unwrap();
-            let loaded = Store::load(&path).unwrap();
-            assert_eq!(loaded.shuffle, shuffle);
-            assert_eq!(loaded.repeat_all, repeat_all);
+        for shuffle in [true, false] {
+            for repeat in [RepeatMode::Off, RepeatMode::All, RepeatMode::One] {
+                let saved = Store {
+                    shuffle,
+                    repeat,
+                    ..Store::default()
+                };
+                saved.save(&path).unwrap();
+                let text = fs::read_to_string(&path).unwrap();
+                assert!(
+                    !text.contains("repeat_all"),
+                    "legacy key must not be written"
+                );
+                let loaded = Store::load(&path).unwrap();
+                assert_eq!(loaded.shuffle, shuffle);
+                assert_eq!(loaded.repeat, repeat);
+            }
         }
+    }
+
+    #[test]
+    fn repeat_modes_serialise_as_lowercase_names() {
+        for (mode, name) in [
+            (RepeatMode::Off, "off"),
+            (RepeatMode::All, "all"),
+            (RepeatMode::One, "one"),
+        ] {
+            let json = serde_json::to_value(Store {
+                repeat: mode,
+                ..Store::default()
+            })
+            .unwrap();
+            assert_eq!(json["repeat"], name);
+        }
+    }
+
+    #[test]
+    fn legacy_repeat_all_flag_loads_as_a_repeat_mode() {
+        let parse = |json: &str| serde_json::from_str::<Store>(json).unwrap().repeat;
+        assert_eq!(parse(r#"{"repeat_all":true}"#), RepeatMode::All);
+        assert_eq!(parse(r#"{"repeat_all":false}"#), RepeatMode::Off);
+        assert_eq!(parse(r#"{"playlists":[]}"#), RepeatMode::Off);
+        assert_eq!(parse(r#"{"repeat":"one"}"#), RepeatMode::One);
+        assert_eq!(parse(r#"{"repeat":"sideways"}"#), RepeatMode::Off);
+    }
+
+    #[test]
+    fn repeat_button_cycles_off_all_one() {
+        assert_eq!(RepeatMode::Off.cycle(), RepeatMode::All);
+        assert_eq!(RepeatMode::All.cycle(), RepeatMode::One);
+        assert_eq!(RepeatMode::One.cycle(), RepeatMode::Off);
     }
 
     #[test]
     fn older_store_and_fresh_install_start_with_shuffle_and_repeat_off() {
         let older: Store = serde_json::from_str(r#"{"playlists":[],"favourites":[]}"#).unwrap();
         assert!(!older.shuffle);
-        assert!(!older.repeat_all);
+        assert_eq!(older.repeat, RepeatMode::Off);
         let temp = TempDir::new();
         let fresh = Store::load(&temp.0.join("missing.json")).unwrap();
         assert!(!fresh.shuffle);
-        assert!(!fresh.repeat_all);
+        assert_eq!(fresh.repeat, RepeatMode::Off);
     }
 }

@@ -4,6 +4,18 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.3.3]
+
+Version 2.3.3 gives the repeat button three modes.
+
+### Fixes
+
+- **Repeat Off, All and One**: The repeat button cycles through three modes.
+  With repeat off, playback stops when the song ends. Repeat all plays the
+  next song and starts the queue over after the last one. Repeat one, shown
+  with a "1" on the button, plays the same song again and again. Next and
+  Previous still change songs in every mode.
+
 ## [2.3.2]
 
 Version 2.3.2 makes Noir Player start on more Windows PCs.

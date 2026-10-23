@@ -29,6 +29,7 @@ pub fn render_equalizer_modal(
             .id("equalizer-backdrop")
             .absolute()
             .inset_0()
+            .occlude()
             .bg(rgba(if is_light { 0x00000066 } else { 0x000000CC }))
             .flex()
             .items_center()

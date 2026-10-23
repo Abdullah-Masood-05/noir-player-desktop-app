@@ -6,9 +6,15 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [2.4.1]
 
-Version 2.4.1 is a small maintenance release with no changes to how Noir
-Player works. If you installed 2.4.0 for all users with the `.msi`, this is
-the first update that offers to move Noir Player to a just-for-you install.
+Version 2.4.1 fixes the song list reacting behind open dialogs. If you
+installed 2.4.0 for all users with the `.msi`, this is the first update that
+offers to move Noir Player to a just-for-you install.
+
+### Fixes
+
+- **Dialogs Block the Song List Behind Them**: With Settings, the Equalizer, the
+  update dialog or a song's menu open, moving the mouse over the dimmed
+  background no longer lights up the songs underneath.
 
 ## [2.4.0]
 

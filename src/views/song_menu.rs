@@ -39,6 +39,7 @@ pub fn render_song_menu(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerMode
             .id("song-menu-backdrop")
             .absolute()
             .inset_0()
+            .occlude()
             .bg(rgba(if is_light { 0x00000055 } else { 0x000000B8 }))
             .flex()
             .items_center()

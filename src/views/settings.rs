@@ -1104,9 +1104,9 @@ fn build_rows(
     rows
 }
 
-/// Says how this copy is installed and lets the user pick how updates
-/// install. A per user copy always updates without an administrator, so
-/// there the all-users choice is shown but cannot be picked.
+/// Says how this copy is installed. An all-users copy also offers the one
+/// opt-in that needs an administrator: upgrading that copy for everyone.
+/// Updates otherwise install just for this account, with no prompt.
 #[cfg(target_os = "windows")]
 fn install_type_row(
     model: &NoirPlayerModel,
@@ -1118,115 +1118,66 @@ fn install_type_row(
     use crate::app::store::InstallPreference;
     use crate::update::InstallScope;
     use crate::views::update::{
-        install_scope_line, ALL_USERS_DETAIL, ALL_USERS_TITLE, JUST_ME_DETAIL, JUST_ME_TITLE,
+        install_scope_line, ALL_USERS_OFF_DETAIL, ALL_USERS_ON_DETAIL, ALL_USERS_TITLE,
     };
 
     let scope = crate::update::install_scope();
-    let chosen = match scope {
-        InstallScope::PerUser => Some(InstallPreference::JustMe),
-        InstallScope::PerMachine => model.store.update_install_type,
-    };
-    let title_color = if is_light { c(0x18181B) } else { white(0.92) };
-    let muted = if is_light { c(0x71717A) } else { white(0.45) };
+    let row = row_base(idx, active, is_light, cx);
+    if scope == InstallScope::PerUser {
+        return row
+            .child(label_cell(
+                "Install Updates",
+                install_scope_line(scope),
+                is_light,
+            ))
+            .into_any_element();
+    }
 
-    let choice = |id: &'static str,
-                  value: InstallPreference,
-                  title: &'static str,
-                  detail: &'static str,
-                  cx: &mut Context<NoirPlayerModel>| {
-        let selected = chosen == Some(value);
-        let enabled = scope == InstallScope::PerMachine || value == InstallPreference::JustMe;
-        h_flex()
-            .id(id)
-            .flex_1()
-            .min_w_0()
-            .items_start()
-            .gap(px(8.0))
-            .px(px(10.0))
-            .py(px(8.0))
-            .rounded_lg()
-            .bg(dynamic_inner_surface(is_light))
-            .border(px(1.5))
-            .border_color(if selected {
-                red().alpha(0.75)
-            } else if is_light {
-                c(0xDEDEE1)
-            } else {
-                c(0x2A2A2E)
-            })
-            .when(!enabled, |d| d.opacity(0.45))
-            .when(enabled, |d| {
-                d.cursor_pointer()
-                    .hover(|s| s.opacity(0.88))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.settings_selected_index = idx;
-                        this.choose_install_type(value, cx);
-                    }))
-            })
+    let all_users = model.store.update_install_type == Some(InstallPreference::AllUsers);
+    row.child(
+        v_flex()
+            .w_full()
+            .gap(px(10.0))
+            .child(label_cell(
+                "Install Updates",
+                install_scope_line(scope),
+                is_light,
+            ))
             .child(
-                div()
-                    .mt(px(2.0))
-                    .size(px(14.0))
-                    .flex_shrink_0()
-                    .rounded_full()
-                    .border(px(1.5))
-                    .border_color(if selected { red() } else { muted })
-                    .flex()
+                h_flex()
+                    .w_full()
                     .items_center()
-                    .justify_center()
-                    .when(selected, |d| {
-                        d.child(div().size(px(6.0)).rounded_full().bg(red()))
-                    }),
-            )
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(title_color)
-                            .child(title),
-                    )
-                    .child(div().text_xs().text_color(muted).child(detail)),
-            )
-    };
-
-    row_base(idx, active, is_light, cx)
-        .child(
-            v_flex()
-                .w_full()
-                .gap(px(10.0))
-                .child(label_cell(
-                    "Install Updates",
-                    install_scope_line(scope),
-                    is_light,
-                ))
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_start()
-                        .gap(px(8.0))
-                        .child(choice(
-                            "install-type-me",
-                            InstallPreference::JustMe,
-                            JUST_ME_TITLE,
-                            JUST_ME_DETAIL,
-                            cx,
-                        ))
-                        .child(choice(
-                            "install-type-all",
-                            InstallPreference::AllUsers,
-                            ALL_USERS_TITLE,
-                            ALL_USERS_DETAIL,
-                            cx,
-                        )),
-                ),
-        )
-        .into_any_element()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(label_cell(
+                        ALL_USERS_TITLE,
+                        if all_users {
+                            ALL_USERS_ON_DETAIL
+                        } else {
+                            ALL_USERS_OFF_DETAIL
+                        },
+                        is_light,
+                    ))
+                    .child(toggle_switch(
+                        "install-all-users-toggle",
+                        all_users,
+                        is_light,
+                        cx,
+                        move |this, _, _, cx| {
+                            this.settings_selected_index = idx;
+                            this.choose_install_type(
+                                if all_users {
+                                    InstallPreference::JustMe
+                                } else {
+                                    InstallPreference::AllUsers
+                                },
+                                cx,
+                            );
+                        },
+                    )),
+            ),
+    )
+    .into_any_element()
 }
 
 // ── Reusable helpers ──────────────────────────────────────────────────────────

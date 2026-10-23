@@ -52,8 +52,11 @@ pub struct Store {
     /// (true = All, false = Off) but only `repeat` is ever written.
     #[serde(default, alias = "repeat_all", deserialize_with = "deserialize_repeat")]
     pub repeat: RepeatMode,
-    /// How updates install on Windows. `None` means the user has not been
-    /// asked yet; only an all-users copy ever asks.
+    /// How updates install on Windows. Only `AllUsers` changes anything: on
+    /// an all-users copy it opts into upgrading that copy for everyone,
+    /// which needs administrator approval. `None` and `JustMe` (saved by
+    /// 2.4 builds, which asked) both mean the default, a per user update
+    /// with no administrator prompt.
     #[serde(default, deserialize_with = "deserialize_install_preference")]
     pub update_install_type: Option<InstallPreference>,
 }
@@ -63,10 +66,10 @@ pub struct Store {
 #[serde(rename_all = "snake_case")]
 pub enum InstallPreference {
     /// Per user, under the user's own folder, with no administrator prompt.
-    /// The recommended choice.
+    /// The default, the same as no choice at all.
     JustMe,
-    /// One copy under Program Files shared by every account on the PC, which
-    /// needs administrator permission for every update.
+    /// Upgrade the all-users copy in Program Files, which needs
+    /// administrator approval for every update. Only ever set explicitly.
     AllUsers,
 }
 
@@ -119,8 +122,9 @@ where
     })
 }
 
-/// An unrecognised value (a choice from a newer build, say) reads as not
-/// asked yet instead of rejecting the whole settings file.
+/// An unrecognised value (a choice from a newer build, say) reads as no
+/// choice, the per user default, instead of rejecting the whole settings
+/// file.
 fn deserialize_install_preference<'de, D>(
     deserializer: D,
 ) -> Result<Option<InstallPreference>, D::Error>
@@ -636,6 +640,18 @@ mod tests {
         let newer: Store =
             serde_json::from_str(r#"{"update_install_type":"something_new"}"#).unwrap();
         assert_eq!(newer.update_install_type, None);
+        let null: Store = serde_json::from_str(r#"{"update_install_type":null}"#).unwrap();
+        assert_eq!(null.update_install_type, None);
+
+        // Values saved by 2.4 builds still load as they were saved.
+        let just_me: Store = serde_json::from_str(r#"{"update_install_type":"just_me"}"#).unwrap();
+        assert_eq!(just_me.update_install_type, Some(InstallPreference::JustMe));
+        let all_users: Store =
+            serde_json::from_str(r#"{"update_install_type":"all_users"}"#).unwrap();
+        assert_eq!(
+            all_users.update_install_type,
+            Some(InstallPreference::AllUsers)
+        );
 
         let temp = TempDir::new();
         let path = temp.0.join("install-type.json");

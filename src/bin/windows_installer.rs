@@ -20,7 +20,7 @@ mod windows {
         bundle_project, BundleBinary, BundleSettings, NsisSettings, PackageSettings, PackageType,
         SettingsBuilder, WindowsSettings,
     };
-    use tauri_utils::config::WebviewInstallMode;
+    use tauri_utils::config::{NSISInstallerMode, WebviewInstallMode};
 
     pub fn run() -> Result<()> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -148,6 +148,10 @@ mod windows {
             nsis: Some(NsisSettings {
                 installer_icon: Some(icon.to_path_buf()),
                 minimum_webview2_version: None,
+                // Spelled out rather than left to the default: the in-app
+                // updater relies on this setup installing for the current
+                // user, into %LOCALAPPDATA%, with no administrator prompt.
+                install_mode: NSISInstallerMode::CurrentUser,
                 ..Default::default()
             }),
             ..Default::default()

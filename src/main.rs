@@ -3,6 +3,7 @@
 mod api;
 mod app;
 mod config;
+mod handoff;
 mod media;
 mod single_instance;
 pub mod update;
@@ -44,6 +45,13 @@ fn main() {
     // opening a second window onto the same library and the same audio
     // device.
     if single_instance::activate_existing() {
+        return;
+    }
+    // An all-users copy whose update installed for this account starts the
+    // newer per-user copy instead. This runs before this process starts
+    // listening for later launches, so the copy it starts can claim that
+    // role itself.
+    if handoff::hand_off_to_newer_copy() {
         return;
     }
     let activation = single_instance::listen_for_activation();

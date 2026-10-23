@@ -440,7 +440,7 @@ mod tests {
             ),
             Some(PerUserInstall {
                 version: "2.5.0".to_string(),
-                exe: PathBuf::from(r"C:\Users\me\AppData\Local\Noir Player\noir_player.exe"),
+                exe: Path::new(r"C:\Users\me\AppData\Local\Noir Player").join("noir_player.exe"),
             })
         );
         // A missing or odd binary name falls back to the one the app ships.
@@ -448,13 +448,13 @@ mod tests {
             per_user_install(some("2.5.0"), some(r"D:\Apps\Noir"), some(r"..\evil.exe"))
                 .unwrap()
                 .exe,
-            PathBuf::from(r"D:\Apps\Noir\noir_player.exe")
+            Path::new(r"D:\Apps\Noir").join("noir_player.exe")
         );
         assert_eq!(
             per_user_install(some("2.5.0"), some(r"D:\Apps\Noir"), None)
                 .unwrap()
                 .exe,
-            PathBuf::from(r"D:\Apps\Noir\noir_player.exe")
+            Path::new(r"D:\Apps\Noir").join("noir_player.exe")
         );
         assert_eq!(per_user_install(None, some(r"D:\Apps"), None), None);
         assert_eq!(per_user_install(some("2.5.0"), None, None), None);

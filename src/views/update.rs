@@ -647,8 +647,11 @@ fn render_notes_content(notes: &str, is_light: bool) -> Vec<Div> {
 }
 
 /// Wording for the Settings choice. Only an all-users copy offers it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const ALL_USERS_TITLE: &str = "Update for all users (needs administrator approval)";
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const ALL_USERS_OFF_DETAIL: &str = "Off: updates install just for you, with no administrator prompt, and Noir Player opens the newer copy from then on. The copy in Program Files stays as it is.";
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const ALL_USERS_ON_DETAIL: &str = "On: updates upgrade the copy in Program Files for everyone on this PC, and Windows asks for administrator approval every time.";
 
 /// How the running copy was installed, in plain words.

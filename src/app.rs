@@ -699,6 +699,7 @@ impl NoirPlayerModel {
 
     /// Saves how Windows updates install, from Settings. Only an all-users
     /// copy offers the choice; updating for all users is an explicit opt-in.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub fn choose_install_type(
         &mut self,
         choice: crate::app::store::InstallPreference,

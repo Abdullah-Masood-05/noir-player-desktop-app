@@ -4,6 +4,12 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.4.1]
+
+Version 2.4.1 is a small maintenance release with no changes to how Noir
+Player works. If you installed 2.4.0 for all users with the `.msi`, this is
+the first update that offers to move Noir Player to a just-for-you install.
+
 ## [2.4.0]
 
 Version 2.4.0 lets you choose how updates install on Windows.

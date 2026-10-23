@@ -90,7 +90,10 @@ jobs:
           python-version: '3.12'
       - name: Install Linux build and packaging dependencies
         if: runner.os == 'Linux'
+        # A stalled Ubuntu mirror otherwise hangs the job until its overall timeout.
+        timeout-minutes: 20
         run: |
+          echo 'Acquire::Retries "5"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/99-ci-network >/dev/null
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config clang libclang-dev \

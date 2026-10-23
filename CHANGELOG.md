@@ -4,6 +4,37 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.4.0]
+
+Version 2.4.0 lets you choose how updates install on Windows.
+
+### Which Windows Download?
+
+- **`setup.exe` for almost everyone**: it installs Noir Player for your
+  account only, without an administrator prompt, and updates install by
+  themselves.
+- **`.msi` for shared PCs**: it installs for every account on the PC, in
+  Program Files. Windows asks for administrator permission on install and on
+  every update.
+- Your library, playlists and settings are kept apart from the app, so
+  switching between the two keeps them.
+
+### Highlights & New Features
+
+- **See How Noir Player Is Installed**: Settings shows whether this copy is
+  installed just for you (no administrator needed) or for all users (Windows
+  asks for administrator permission to install updates).
+- **Choose How Updates Install**: In Settings, pick **Just for me**
+  (recommended) or **For all users**. The first time an update is found on an
+  all-users copy, Noir Player asks which you want, with **Just for me**
+  already selected, so pressing Enter is all it takes.
+- **Move to a Just-for-Me Install**: With **Just for me**, the next update
+  installs Noir Player into your user folder and asks for administrator
+  permission one last time, only to remove the old all-users copy. After that,
+  updates never ask again. If you say no, the new copy still works, and
+  Noir Player tells you how to remove the old one from Windows Settings →
+  Apps.
+
 ## [2.3.3]
 
 Version 2.3.3 gives the repeat button three modes.

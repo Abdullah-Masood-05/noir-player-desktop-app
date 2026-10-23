@@ -14,6 +14,15 @@ This is the desktop version of [NoirPlayer for Android](https://github.com/Abdul
 
 Download the latest version from the [releases page](https://github.com/Abdullah-Masood-05/noir-player-desktop-app/releases/latest). See [packaging and releases](#packaging-and-releases) for target platforms and testing status.
 
+### Which Windows download?
+
+Each Windows release has two installers.
+
+- **`noir-player-VERSION-windows-x64-setup.exe`** is the right one for almost everyone. It installs for your account only, without an administrator prompt, and updates install by themselves.
+- **`noir-player-VERSION-windows-x64.msi`** installs for every account on the PC, in Program Files. Use it only on a shared computer where everyone needs the app. Windows asks for administrator permission on install and on every update.
+
+Your library, playlists and settings are kept in `%LOCALAPPDATA%\noir-player`, apart from the app, so switching installers keeps them. To move from the `.msi` to a per-user install, set **Settings → Updates → Install updates** to **Just for me**. The next update moves the app and asks for administrator permission one last time to remove the old copy. You can also uninstall the app and reinstall it with `setup.exe`.
+
 ## Playback and library
 
 The library scans the system Music folder by default as well as any custom folders configured in **Settings** (`Ctrl+,`). Scanning runs recursively on startup and when rescanned, reading title, artist, album, release year, duration, and embedded artwork, plus each file's modified time for the recently added ordering. It groups tracks by album and artist, deduplicates files across folders, and searches across title, artist, and album. It does not follow symbolic links or Windows reparse points. Multiple scan folders can be added, removed, or rescanned at any time via the Settings modal.
@@ -203,7 +212,7 @@ Build and packaging decisions are based on:
 
 ## Packaging and releases
 
-The current workflow produces the following assets, where `VERSION` is the version in `Cargo.toml`. Starting with version 1.2.0, Windows distribution includes official WiX MSI and NSIS setup installers.
+The current workflow produces the following assets, where `VERSION` is the version in `Cargo.toml`. Starting with version 1.2.0, Windows distribution includes official WiX MSI and NSIS setup installers. The NSIS `setup.exe` installs per user under `%LOCALAPPDATA%` with no administrator prompt, and its updates install silently. The MSI installs for all users in Program Files and needs administrator permission for installs and updates. See [Which Windows download?](#which-windows-download) for which to pick and how to switch.
 
 | Target | Runner | Artifact |
 | --- | --- | --- |
@@ -211,7 +220,7 @@ The current workflow produces the following assets, where `VERSION` is the versi
 | `aarch64-apple-darwin` | `macos-14` | `noir-player-VERSION-macos-arm64.dmg` |
 | `x86_64-unknown-linux-gnu` | `ubuntu-24.04` | `noir-player-VERSION-linux-x64.deb`, `.rpm` and `.pkg.tar.zst` |
 
-These are configured targets, not claims of successful builds or runtime tests. Linux and macOS remain unverified until their runners pass and the resulting packages receive manual smoke tests. Windows packages also need release-candidate testing. No installer signing, Apple notarization or automatic updates are configured. OS security warnings are expected for unsigned downloads.
+These are configured targets, not claims of successful builds or runtime tests. Linux and macOS remain unverified until their runners pass and the resulting packages receive manual smoke tests. Windows packages also need release-candidate testing. No installer signing or Apple notarization is configured. OS security warnings are expected for unsigned downloads.
 
 CI checks formatting, typechecking, build, tests and Clippy on all three platforms. Windows also checks the `installer` feature and runs Clippy with `-D warnings`, builds the release application, generates both installers, validates exactly one nonempty MSI and NSIS EXE, and uploads `ci-windows-x64-installers` for 14 days. Branch pushes, pull requests and manual CI dispatch exercise generation without a release tag; they do not install or launch the application.
 

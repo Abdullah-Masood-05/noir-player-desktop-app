@@ -4,48 +4,43 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
-## [2.4.1]
-
-Version 2.4.1 fixes the song list reacting behind open dialogs. If you
-installed 2.4.0 for all users with the `.msi`, this is the first update that
-offers to move Noir Player to a just-for-you install.
-
-### Fixes
-
-- **Dialogs Block the Song List Behind Them**: With Settings, the Equalizer, the
-  update dialog or a song's menu open, moving the mouse over the dimmed
-  background no longer lights up the songs underneath.
-
 ## [2.4.0]
 
-Version 2.4.0 lets you choose how updates install on Windows.
+Version 2.4.0 installs updates on Windows without administrator prompts.
 
 ### Which Windows Download?
 
 - **`setup.exe` for almost everyone**: it installs Noir Player for your
-  account only, without an administrator prompt, and updates install by
-  themselves.
+  account only, without an administrator prompt.
 - **`.msi` for shared PCs**: it installs for every account on the PC, in
-  Program Files. Windows asks for administrator permission on install and on
-  every update.
-- Your library, playlists and settings are kept apart from the app, so
-  switching between the two keeps them.
+  Program Files, so Windows asks for administrator permission once, when you
+  install it.
+- Either way, updates install without an administrator prompt. Your library,
+  playlists and settings are kept apart from the app, so switching between
+  the two keeps them.
 
 ### Highlights & New Features
 
+- **Updates Without Administrator Prompts**: Updates install just for you,
+  whichever installer you used, with no administrator prompt and no question
+  first. On an all-users copy, the update goes into your user folder, and the
+  Start menu entry you already use opens the newer copy. The copy in Program
+  Files stays as it is, so other accounts on the PC keep working.
+- **Update for All Users, If You Want It**: To upgrade the copy in Program
+  Files for everyone instead, turn on **Update for all users (needs
+  administrator approval)** in Settings. Windows then asks for administrator
+  approval on each update.
 - **See How Noir Player Is Installed**: Settings shows whether this copy is
-  installed just for you (no administrator needed) or for all users (Windows
-  asks for administrator permission to install updates).
-- **Choose How Updates Install**: In Settings, pick **Just for me**
-  (recommended) or **For all users**. The first time an update is found on an
-  all-users copy, Noir Player asks which you want, with **Just for me**
-  already selected, so pressing Enter is all it takes.
-- **Move to a Just-for-Me Install**: With **Just for me**, the next update
-  installs Noir Player into your user folder and asks for administrator
-  permission one last time, only to remove the old all-users copy. After that,
-  updates never ask again. If you say no, the new copy still works, and
-  Noir Player tells you how to remove the old one from Windows Settings →
-  Apps.
+  installed just for you or for all users.
+
+### Fixes
+
+- **The Update Dialog Stays Open**: The update dialog closes only with its
+  own buttons. Clicking outside it does nothing, and Escape doesn't hide a
+  download that is in progress; use **Cancel** to stop it.
+- **Dialogs Block the Song List Behind Them**: With Settings, the Equalizer,
+  the update dialog or a song's menu open, moving the mouse over the dimmed
+  background doesn't light up the songs underneath.
 
 ## [2.3.3]
 

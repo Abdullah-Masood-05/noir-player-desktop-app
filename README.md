@@ -19,9 +19,9 @@ Download the latest version from the [releases page](https://github.com/Abdullah
 Each Windows release has two installers.
 
 - **`noir-player-VERSION-windows-x64-setup.exe`** is the right one for almost everyone. It installs for your account only, without an administrator prompt, and updates install by themselves.
-- **`noir-player-VERSION-windows-x64.msi`** installs for every account on the PC, in Program Files. Use it only on a shared computer where everyone needs the app. Windows asks for administrator permission on install and on every update.
+- **`noir-player-VERSION-windows-x64.msi`** installs for every account on the PC, in Program Files. Use it only on a shared computer where everyone needs the app. Windows asks for administrator permission to install it, but in-app updates do not: they install the new version just for you, and the Start menu entry opens that newer copy from then on.
 
-Your library, playlists and settings are kept in `%LOCALAPPDATA%\noir-player`, apart from the app, so switching installers keeps them. To move from the `.msi` to a per-user install, set **Settings → Updates → Install updates** to **Just for me**. The next update moves the app and asks for administrator permission one last time to remove the old copy. You can also uninstall the app and reinstall it with `setup.exe`.
+Your library, playlists and settings are kept in `%LOCALAPPDATA%\noir-player`, apart from the app, so switching installers keeps them. On an `.msi` copy, updates leave the copy in Program Files as it is, so other accounts keep the version they had. To upgrade that copy for everyone instead, turn on **Update for all users (needs administrator approval)** in **Settings → Install Updates**. Windows then asks for administrator approval on each update. You can also uninstall the `.msi` copy and reinstall the app with `setup.exe`.
 
 ## Playback and library
 
@@ -212,7 +212,7 @@ Build and packaging decisions are based on:
 
 ## Packaging and releases
 
-The current workflow produces the following assets, where `VERSION` is the version in `Cargo.toml`. Starting with version 1.2.0, Windows distribution includes official WiX MSI and NSIS setup installers. The NSIS `setup.exe` installs per user under `%LOCALAPPDATA%` with no administrator prompt, and its updates install silently. The MSI installs for all users in Program Files and needs administrator permission for installs and updates. See [Which Windows download?](#which-windows-download) for which to pick and how to switch.
+The current workflow produces the following assets, where `VERSION` is the version in `Cargo.toml`. Starting with version 1.2.0, Windows distribution includes official WiX MSI and NSIS setup installers. The NSIS `setup.exe` installs per user under `%LOCALAPPDATA%` with no administrator prompt, and its updates install silently. The MSI installs for all users in Program Files and needs administrator permission to install. Its in-app updates install per user with no prompt, unless **Update for all users** is turned on. See [Which Windows download?](#which-windows-download) for which to pick and how to switch.
 
 | Target | Runner | Artifact |
 | --- | --- | --- |

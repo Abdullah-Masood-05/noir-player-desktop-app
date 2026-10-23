@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+pub use crate::app::store::InstallPreference;
+
 pub const REPO: &str = "Abdullah-Masood-05/noir-player-desktop-app";
 const USER_AGENT: &str = "NoirPlayer-Desktop";
 /// Largest installer the updater will accept, well above any current asset.
@@ -46,8 +48,8 @@ pub struct ReleaseInfo {
 
 impl ReleaseInfo {
     /// The installer for the running platform, if the release published one.
-    pub fn platform_asset(&self) -> Option<&ReleaseAsset> {
-        platform_asset(&self.assets)
+    pub fn platform_asset(&self, preference: Option<InstallPreference>) -> Option<&ReleaseAsset> {
+        platform_asset(&self.assets, preference)
     }
 }
 
@@ -315,20 +317,26 @@ fn parse_release(json: &Value) -> Result<ReleaseInfo> {
     })
 }
 
-/// Picks the release asset that this platform can install.
-pub fn platform_asset(assets: &[ReleaseAsset]) -> Option<&ReleaseAsset> {
+/// Picks the release asset that this platform can install. `preference` is
+/// the saved Windows install type and is ignored elsewhere.
+pub fn platform_asset(
+    assets: &[ReleaseAsset],
+    preference: Option<InstallPreference>,
+) -> Option<&ReleaseAsset> {
     #[cfg(target_os = "windows")]
     {
-        windows_asset(assets, install_scope())
+        windows_asset(assets, update_plan(install_scope(), preference))
     }
     #[cfg(target_os = "macos")]
     {
+        let _ = preference;
         assets
             .iter()
             .find(|asset| asset.name.to_ascii_lowercase().ends_with(".dmg"))
     }
     #[cfg(target_os = "linux")]
     {
+        let _ = preference;
         // The package the running copy came from, so the package manager can
         // upgrade it. Sandboxed copies fall back to the distribution's format.
         let package = linux::detected()
@@ -341,7 +349,7 @@ pub fn platform_asset(assets: &[ReleaseAsset]) -> Option<&ReleaseAsset> {
 /// How the running copy of the app was installed on Windows. The two
 /// installers land in different places, so updating the copy the user
 /// actually launches means matching the one it came from.
-#[cfg(target_os = "windows")]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstallScope {
     /// A per user NSIS install, under a directory this account can write.
@@ -350,39 +358,90 @@ pub enum InstallScope {
     PerMachine,
 }
 
-/// Probes the directory the app runs from. A directory this account cannot
-/// write to means a per machine install, which the MSI upgrades in place.
-#[cfg(target_os = "windows")]
-pub fn install_scope() -> InstallScope {
-    let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    else {
-        return InstallScope::PerUser;
-    };
-    let probe = dir.join(".noir-update-probe");
-    match std::fs::File::create(&probe) {
-        Ok(_) => {
-            let _ = std::fs::remove_file(&probe);
-            InstallScope::PerUser
-        }
-        Err(_) => InstallScope::PerMachine,
+/// How the next Windows update installs.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdatePlan {
+    /// The per user NSIS setup updates a per user copy, with no prompt.
+    PerUserSetup,
+    /// Windows Installer upgrades the all-users copy, asking for elevation.
+    MachineMsi,
+    /// Install the per user setup, then remove the all-users MSI copy with
+    /// one elevated uninstall.
+    MigrateToPerUser,
+    /// An all-users copy whose owner has not chosen yet: ask before
+    /// downloading anything.
+    AskFirst,
+}
+
+/// The update plan for a copy installed with `scope`, given the saved
+/// install type. A per user copy never asks: it already updates without an
+/// administrator.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn update_plan(scope: InstallScope, preference: Option<InstallPreference>) -> UpdatePlan {
+    match (scope, preference) {
+        (InstallScope::PerUser, _) => UpdatePlan::PerUserSetup,
+        (InstallScope::PerMachine, None) => UpdatePlan::AskFirst,
+        (InstallScope::PerMachine, Some(InstallPreference::AllUsers)) => UpdatePlan::MachineMsi,
+        (InstallScope::PerMachine, Some(InstallPreference::JustMe)) => UpdatePlan::MigrateToPerUser,
     }
 }
 
+/// The plan for the running copy on Windows; `None` on other platforms.
+pub fn current_plan(preference: Option<InstallPreference>) -> Option<UpdatePlan> {
+    #[cfg(target_os = "windows")]
+    {
+        Some(update_plan(install_scope(), preference))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = preference;
+        None
+    }
+}
+
+/// Probes the directory the app runs from. A directory this account cannot
+/// write to means a per machine install, which the MSI upgrades in place.
+/// The answer cannot change while the app runs, so the probe runs once.
 #[cfg(target_os = "windows")]
-pub fn windows_asset(assets: &[ReleaseAsset], scope: InstallScope) -> Option<&ReleaseAsset> {
+pub fn install_scope() -> InstallScope {
+    static SCOPE: std::sync::OnceLock<InstallScope> = std::sync::OnceLock::new();
+    *SCOPE.get_or_init(|| {
+        let Some(dir) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        else {
+            return InstallScope::PerUser;
+        };
+        let probe = dir.join(".noir-update-probe");
+        match std::fs::File::create(&probe) {
+            Ok(_) => {
+                let _ = std::fs::remove_file(&probe);
+                InstallScope::PerUser
+            }
+            Err(_) => InstallScope::PerMachine,
+        }
+    })
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_asset(assets: &[ReleaseAsset], plan: UpdatePlan) -> Option<&ReleaseAsset> {
     let find = |suffix: &str| {
         assets
             .iter()
             .find(|asset| asset.name.to_ascii_lowercase().ends_with(suffix))
     };
-    match scope {
+    match plan {
         // The NSIS setup installs per user and runs unattended with /S.
-        InstallScope::PerUser => find("-setup.exe").or_else(|| find(".msi")),
+        UpdatePlan::PerUserSetup => find("-setup.exe").or_else(|| find(".msi")),
+        // Moving to a per user install needs the per user setup; an MSI
+        // would only upgrade the all-users copy again.
+        UpdatePlan::MigrateToPerUser => find("-setup.exe").or_else(|| find(".msi")),
         // Windows Installer upgrades the existing per machine install in
         // place, asking for elevation itself.
-        InstallScope::PerMachine => find(".msi").or_else(|| find("-setup.exe")),
+        UpdatePlan::MachineMsi => find(".msi").or_else(|| find("-setup.exe")),
+        // Nothing is downloaded until the owner picks an install type.
+        UpdatePlan::AskFirst => None,
     }
 }
 
@@ -593,7 +652,10 @@ pub fn find_checksum(text: &str, asset_name: &str) -> Option<String> {
 /// away: the helper waits for this process to exit before touching any
 /// installed files. On Linux it blocks until the package manager finishes,
 /// so call it off the UI thread.
-pub fn launch_installer(installer: &Path) -> Result<InstallOutcome> {
+pub fn launch_installer(
+    installer: &Path,
+    preference: Option<InstallPreference>,
+) -> Result<InstallOutcome> {
     let installer = plain_absolute(installer);
     if !installer.is_file() {
         bail!("The downloaded installer is missing.");
@@ -606,6 +668,12 @@ pub fn launch_installer(installer: &Path) -> Result<InstallOutcome> {
             "This build runs from the cargo target directory, so there is nothing to update in              place. Install a released build to use the updater."
         );
     }
+    #[cfg(target_os = "windows")]
+    if current_plan(preference) == Some(UpdatePlan::MigrateToPerUser) && is_setup_exe(&installer) {
+        return spawn_migration(&installer);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = preference;
     spawn_installer(&installer)
 }
 
@@ -656,12 +724,6 @@ fn spawn_installer(installer: &Path) -> Result<InstallOutcome> {
     Ok(InstallOutcome::Quit)
 }
 
-/// Batch helper that waits for the app to exit, installs it, starts the new
-/// build and deletes itself. The NSIS setup installs per user and runs
-/// unattended under `/S`; Windows Installer upgrades a per machine install
-/// and asks for elevation on its own. The exit code is logged either way, so
-/// a failed install leaves a trace instead of silently reopening the old
-/// build.
 /// Whether a directory is a cargo build output such as `target/debug` or
 /// `target/x86_64-pc-windows-msvc/release`.
 fn is_cargo_build_output(dir: &Path) -> bool {
@@ -672,6 +734,12 @@ fn is_cargo_build_output(dir: &Path) -> bool {
             .any(|ancestor| ancestor.file_name().and_then(|name| name.to_str()) == Some("target"))
 }
 
+/// Batch helper that waits for the app to exit, installs it, starts the new
+/// build and deletes itself. The NSIS setup installs per user and runs
+/// unattended under `/S`; Windows Installer upgrades a per machine install
+/// and asks for elevation on its own. The exit code is logged either way, so
+/// a failed install leaves a trace instead of silently reopening the old
+/// build.
 #[cfg(target_os = "windows")]
 fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) -> String {
     let is_msi = installer
@@ -725,6 +793,272 @@ fn windows_install_script(pid: u32, installer: &Path, exe: &Path, log: &Path) ->
         String::new(),
     ];
     lines.join("\r\n")
+}
+
+/// The product name both Windows installers use, from `bundle.name` in
+/// Cargo.toml. The NSIS setup installs per user into
+/// `%LOCALAPPDATA%\<product name>`, and the MSI registers under it in
+/// Programs and Features.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+const WINDOWS_PRODUCT_NAME: &str = "Noir Player";
+/// The executable both installers place, from the `noir_player` binary.
+#[cfg(target_os = "windows")]
+const WINDOWS_MAIN_BINARY: &str = "noir_player.exe";
+/// Written by the migration helper when it could not finish, and read once
+/// by the next launch. It lives beside the downloads, never in the library.
+const INSTALL_NOTICE_FILE: &str = "install-notice.txt";
+const NOTICE_OLD_COPY_REMAINS: &str = "old-copy-remains";
+const NOTICE_SETUP_FAILED: &str = "setup-failed";
+
+#[cfg(target_os = "windows")]
+fn is_setup_exe(installer: &Path) -> bool {
+    installer
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.to_ascii_lowercase().ends_with("-setup.exe"))
+}
+
+/// The product code of the all-users MSI copy, read from `reg query` output
+/// for the Uninstall key. Windows Installer registers a product under its
+/// `{GUID}` product code with `WindowsInstaller` set to 1; the per user NSIS
+/// install shares the display name but is neither.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn find_msi_product_code(reg_output: &str, display_name: &str) -> Option<String> {
+    #[derive(Default)]
+    struct Entry<'a> {
+        key: &'a str,
+        name_matches: bool,
+        windows_installer: bool,
+    }
+
+    fn product_code(entry: Entry) -> Option<String> {
+        if !(entry.name_matches && entry.windows_installer) {
+            return None;
+        }
+        let leaf = entry.key.trim_end().rsplit('\\').next()?;
+        let inner = leaf.strip_prefix('{')?.strip_suffix('}')?;
+        let groups: Vec<&str> = inner.split('-').collect();
+        let is_guid = groups.len() == 5
+            && groups.iter().zip([8, 4, 4, 4, 12]).all(|(group, len)| {
+                group.len() == len && group.chars().all(|c| c.is_ascii_hexdigit())
+            });
+        is_guid.then(|| leaf.to_string())
+    }
+
+    let mut current: Option<Entry> = None;
+    for line in reg_output.lines() {
+        if line.starts_with("HKEY_") {
+            if let Some(code) = current.take().and_then(product_code) {
+                return Some(code);
+            }
+            current = Some(Entry {
+                key: line,
+                ..Entry::default()
+            });
+            continue;
+        }
+        let Some(entry) = current.as_mut() else {
+            continue;
+        };
+        // `reg query` prints values as `    Name    REG_TYPE    Data`.
+        let mut parts = line.trim_start().splitn(3, "    ");
+        let (Some(name), Some(kind)) = (parts.next(), parts.next()) else {
+            continue;
+        };
+        let data = parts.next().unwrap_or("").trim();
+        if name.eq_ignore_ascii_case("DisplayName") && kind == "REG_SZ" {
+            entry.name_matches = data.eq_ignore_ascii_case(display_name);
+        } else if name.eq_ignore_ascii_case("WindowsInstaller") && kind == "REG_DWORD" {
+            entry.windows_installer = data
+                .strip_prefix("0x")
+                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                == Some(1);
+        }
+    }
+    current.and_then(product_code)
+}
+
+/// Looks up the installed all-users MSI copy, if Windows lists one.
+#[cfg(target_os = "windows")]
+fn installed_msi_product_code() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let system_root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let output = std::process::Command::new(Path::new(&system_root).join(r"System32\reg.exe"))
+        .args([
+            "query",
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            "/s",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    find_msi_product_code(
+        &String::from_utf8_lossy(&output.stdout),
+        WINDOWS_PRODUCT_NAME,
+    )
+}
+
+/// Moves an all-users copy to a per user one: once this process exits, the
+/// helper installs the per user setup, removes the MSI copy with a single
+/// elevated uninstall, and opens the new copy.
+#[cfg(target_os = "windows")]
+fn spawn_migration(setup: &Path) -> Result<InstallOutcome> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let old_exe = std::env::current_exe().context("Could not locate the running application")?;
+    let new_dir = dirs::data_local_dir()
+        .context("No local app data folder is available for a per user install")?
+        .join(WINDOWS_PRODUCT_NAME);
+    let product_code = installed_msi_product_code();
+    let dir = setup
+        .parent()
+        .context("The downloaded installer has no folder")?;
+    let log = setup.with_extension("install.log");
+    let notice = dir.join(INSTALL_NOTICE_FILE);
+    let script = windows_migration_script(&MigrationPaths {
+        pid: std::process::id(),
+        setup,
+        old_exe: &old_exe,
+        new_dir: &new_dir,
+        product_code: product_code.as_deref(),
+        log: &log,
+        notice: &notice,
+    });
+    let script_path = setup.with_extension("install.cmd");
+    std::fs::write(&script_path, script)
+        .with_context(|| format!("Could not write {}", script_path.display()))?;
+
+    std::process::Command::new("cmd")
+        .arg("/C")
+        .arg(&script_path)
+        .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+        .spawn()
+        .context("Could not start the installer")?;
+    Ok(InstallOutcome::Quit)
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct MigrationPaths<'a> {
+    pid: u32,
+    setup: &'a Path,
+    /// The all-users copy running now, reopened if the setup fails.
+    old_exe: &'a Path,
+    /// Where the per user setup installs.
+    new_dir: &'a Path,
+    /// `None` when Windows lists no MSI copy, so there is nothing to remove.
+    product_code: Option<&'a str>,
+    log: &'a Path,
+    notice: &'a Path,
+}
+
+/// Batch helper for the move to a per user install. It waits for the app to
+/// exit, runs the NSIS setup silently (`/S`) into `new_dir` (`/D=`, which
+/// NSIS requires last and unquoted), and only once that succeeded removes
+/// the MSI copy with `msiexec /x` behind a single elevation prompt. The new
+/// copy opens either way; a declined prompt leaves a notice for it to show.
+/// A failed setup leaves the old copy alone and reopens it.
+#[cfg(target_os = "windows")]
+fn windows_migration_script(paths: &MigrationPaths) -> String {
+    let MigrationPaths {
+        pid,
+        setup,
+        old_exe,
+        new_dir,
+        product_code,
+        log,
+        notice,
+    } = *paths;
+    let new_exe = new_dir.join(WINDOWS_MAIN_BINARY);
+    let system32 = r"%SystemRoot%\System32";
+    let log = log.display();
+    let notice = notice.display();
+
+    let mut lines = vec![
+        "@echo off".to_string(),
+        ":waitloop".to_string(),
+        format!(
+            r#"{system32}\tasklist.exe /FI "PID eq {pid}" /NH 2>nul | {system32}\find.exe "{pid}" >nul"#
+        ),
+        "if not errorlevel 1 (".to_string(),
+        format!(r"{system32}\ping.exe -n 2 127.0.0.1 >nul"),
+        "goto waitloop".to_string(),
+        ")".to_string(),
+        format!(
+            r#"start "" /wait "{}" /S /D={}"#,
+            setup.display(),
+            new_dir.display()
+        ),
+        r#"set "SETUP_EXIT=%errorlevel%""#.to_string(),
+        format!(r#"echo [%date% %time%] per user setup exit=%SETUP_EXIT% >> "{log}""#),
+        r#"if not "%SETUP_EXIT%"=="0" goto setupfailed"#.to_string(),
+        format!(r#"if not exist "{}" goto setupfailed"#, new_exe.display()),
+    ];
+    match product_code {
+        Some(code) => lines.extend([
+            // Start-Process -Verb RunAs is ShellExecute "runas", the one step
+            // that needs an administrator. A declined prompt throws, which
+            // exits 1223, ERROR_CANCELLED.
+            format!(
+                r#"{system32}\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -Command "try {{ $p = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\msiexec.exe') -ArgumentList '/x','{code}','/qn','/norestart' -Verb RunAs -Wait -PassThru; exit $p.ExitCode }} catch {{ exit 1223 }}""#
+            ),
+            r#"set "REMOVE_EXIT=%errorlevel%""#.to_string(),
+            format!(
+                r#"echo [%date% %time%] all users copy removal exit=%REMOVE_EXIT% >> "{log}""#
+            ),
+            // Removed, removed once Windows restarts, or already gone.
+            r#"if "%REMOVE_EXIT%"=="0" goto relaunch"#.to_string(),
+            r#"if "%REMOVE_EXIT%"=="3010" goto relaunch"#.to_string(),
+            r#"if "%REMOVE_EXIT%"=="1605" goto relaunch"#.to_string(),
+            format!(r#">"{notice}" echo {NOTICE_OLD_COPY_REMAINS}"#),
+        ]),
+        None => lines.push(format!(
+            r#"echo [%date% %time%] no all users copy is registered >> "{log}""#
+        )),
+    }
+    lines.extend([
+        ":relaunch".to_string(),
+        format!(r#"start "" "{}""#, new_exe.display()),
+        "goto done".to_string(),
+        ":setupfailed".to_string(),
+        format!(r#">"{notice}" echo {NOTICE_SETUP_FAILED}"#),
+        format!(r#"if exist "{0}" start "" "{0}""#, old_exe.display()),
+        ":done".to_string(),
+        // Leaving the batch context first lets the script delete itself.
+        r#"(goto) 2>nul & del "%~f0""#.to_string(),
+        String::new(),
+    ]);
+    lines.join("\r\n")
+}
+
+/// What the migration helper left for this launch to say, read once.
+pub fn take_install_notice() -> Option<String> {
+    let path = update_dir().ok()?.join(INSTALL_NOTICE_FILE);
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    install_notice_message(&text)
+}
+
+fn install_notice_message(marker: &str) -> Option<String> {
+    match marker.trim() {
+        NOTICE_OLD_COPY_REMAINS => Some(format!(
+            "Noir Player now updates just for you, with no administrator prompts. The old \
+             all-users copy is still installed. You can remove it any time in Windows \
+             Settings \u{2192} Apps, where it is listed as {WINDOWS_PRODUCT_NAME}. Your \
+             library and playlists are unchanged."
+        )),
+        NOTICE_SETUP_FAILED => Some(
+            "The update could not be installed just for you, so Noir Player kept the copy \
+             you already had. Nothing was removed, and your library and playlists are \
+             unchanged. You can try again, or pick For all users in Settings."
+                .to_string(),
+        ),
+        _ => None,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1578,25 +1912,26 @@ mod tests {
         // Test the underlying `windows_asset` with explicit scopes instead.
         #[cfg(target_os = "windows")]
         {
-            let per_user = windows_asset(&assets, InstallScope::PerUser).expect("per-user asset");
+            let per_user =
+                windows_asset(&assets, UpdatePlan::PerUserSetup).expect("per-user asset");
             assert!(
                 per_user.name.ends_with("-setup.exe"),
-                "PerUser should prefer -setup.exe, got {}",
+                "PerUserSetup should prefer -setup.exe, got {}",
                 per_user.name
             );
 
             let per_machine =
-                windows_asset(&assets, InstallScope::PerMachine).expect("per-machine asset");
+                windows_asset(&assets, UpdatePlan::MachineMsi).expect("per-machine asset");
             assert!(
                 per_machine.name.ends_with(".msi"),
-                "PerMachine should prefer .msi, got {}",
+                "MachineMsi should prefer .msi, got {}",
                 per_machine.name
             );
         }
 
         #[cfg(target_os = "macos")]
         {
-            let picked = platform_asset(&assets).expect("macOS asset");
+            let picked = platform_asset(&assets, None).expect("macOS asset");
             assert!(
                 picked.name.ends_with(".dmg"),
                 "macOS should pick .dmg, got {}",
@@ -1624,7 +1959,7 @@ mod tests {
         #[cfg(target_os = "linux")]
         assert!(linux::asset(&assets, linux::Package::Deb).is_none());
         #[cfg(not(target_os = "linux"))]
-        assert!(platform_asset(&assets).is_none());
+        assert!(platform_asset(&assets, Some(InstallPreference::JustMe)).is_none());
     }
 
     #[test]
@@ -1661,7 +1996,7 @@ mod tests {
             return;
         };
         let asset = release
-            .platform_asset()
+            .platform_asset(Some(InstallPreference::JustMe))
             .expect("the release publishes an installer for this platform")
             .clone();
 
@@ -1741,27 +2076,182 @@ mod tests {
         )));
     }
 
-    /// A per machine install has to be upgraded by Windows Installer. The
-    /// NSIS setup would drop a second per user copy elsewhere and leave the
-    /// shortcut opening the old build.
-    #[cfg(target_os = "windows")]
     #[test]
-    fn windows_asset_follows_the_install_scope() {
-        let assets = vec![
-            asset("noir-player-2.0.0-windows-x64.msi"),
-            asset("noir-player-2.0.0-windows-x64-setup.exe"),
+    fn update_plan_covers_every_scope_and_choice() {
+        use InstallPreference::{AllUsers, JustMe};
+        let cases = [
+            (InstallScope::PerUser, None, UpdatePlan::PerUserSetup),
+            (
+                InstallScope::PerUser,
+                Some(JustMe),
+                UpdatePlan::PerUserSetup,
+            ),
+            (
+                InstallScope::PerUser,
+                Some(AllUsers),
+                UpdatePlan::PerUserSetup,
+            ),
+            (InstallScope::PerMachine, None, UpdatePlan::AskFirst),
+            (
+                InstallScope::PerMachine,
+                Some(JustMe),
+                UpdatePlan::MigrateToPerUser,
+            ),
+            (
+                InstallScope::PerMachine,
+                Some(AllUsers),
+                UpdatePlan::MachineMsi,
+            ),
         ];
+        for (scope, preference, plan) in cases {
+            assert_eq!(
+                update_plan(scope, preference),
+                plan,
+                "{scope:?} {preference:?}"
+            );
+        }
+    }
+
+    /// `reg query HKLM\...\Uninstall /s` output: the MSI copy sits under its
+    /// product code with WindowsInstaller 1. A per user NSIS key with the
+    /// same name, a different MSI product and a non GUID key are skipped.
+    #[test]
+    fn the_msi_product_code_comes_from_its_uninstall_key() {
+        let sample = "\r\n\
+HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Noir Player\r\n\
+    DisplayName    REG_SZ    Noir Player\r\n\
+    UninstallString    REG_SZ    \"C:\\Users\\me\\AppData\\Local\\Noir Player\\uninstall.exe\"\r\n\
+\r\n\
+HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{11111111-2222-3333-4444-555555555555}\r\n\
+    DisplayName    REG_SZ    Some Other App\r\n\
+    WindowsInstaller    REG_DWORD    0x1\r\n\
+\r\n\
+HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}\r\n\
+    AuthorizedCDFPrefix    REG_SZ    \r\n\
+    DisplayName    REG_SZ    Noir Player\r\n\
+    DisplayVersion    REG_SZ    2.3.3\r\n\
+    Publisher    REG_SZ    Abdullah Masood\r\n\
+    UninstallString    REG_EXPAND_SZ    MsiExec.exe /X{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}\r\n\
+    WindowsInstaller    REG_DWORD    0x1\r\n\
+\r\n\
+HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}\\Child\r\n";
         assert_eq!(
-            windows_asset(&assets, InstallScope::PerMachine).map(|a| a.name.as_str()),
-            Some("noir-player-2.0.0-windows-x64.msi")
+            find_msi_product_code(sample, "Noir Player").as_deref(),
+            Some("{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}")
         );
+        assert_eq!(find_msi_product_code(sample, "Missing App"), None);
+
+        // The last key in the output still counts.
+        let last = "HKEY_LOCAL_MACHINE\\X\\Uninstall\\{ABCDEF01-2345-6789-ABCD-EF0123456789}\n    WindowsInstaller    REG_DWORD    0x1\n    DisplayName    REG_SZ    noir player\n";
         assert_eq!(
-            windows_asset(&assets, InstallScope::PerUser).map(|a| a.name.as_str()),
-            Some("noir-player-2.0.0-windows-x64-setup.exe")
+            find_msi_product_code(last, "Noir Player").as_deref(),
+            Some("{ABCDEF01-2345-6789-ABCD-EF0123456789}")
         );
 
-        let only_setup = vec![asset("noir-player-2.0.0-windows-x64-setup.exe")];
-        assert!(windows_asset(&only_setup, InstallScope::PerMachine).is_some());
+        // Not an MSI, or a key that is not a product code.
+        let not_msi = "HKEY_LOCAL_MACHINE\\X\\Uninstall\\{ABCDEF01-2345-6789-ABCD-EF0123456789}\n    DisplayName    REG_SZ    Noir Player\n    WindowsInstaller    REG_DWORD    0x0\n";
+        assert_eq!(find_msi_product_code(not_msi, "Noir Player"), None);
+        let not_guid = "HKEY_LOCAL_MACHINE\\X\\Uninstall\\NoirPlayer\n    DisplayName    REG_SZ    Noir Player\n    WindowsInstaller    REG_DWORD    0x1\n";
+        assert_eq!(find_msi_product_code(not_guid, "Noir Player"), None);
+        assert_eq!(find_msi_product_code("", "Noir Player"), None);
+    }
+
+    #[test]
+    fn migration_notices_read_back_as_messages() {
+        let remains = install_notice_message("old-copy-remains\r\n").unwrap();
+        assert!(remains.contains("Windows Settings \u{2192} Apps"));
+        assert!(remains.contains("library and playlists are unchanged"));
+        assert!(install_notice_message(NOTICE_SETUP_FAILED)
+            .unwrap()
+            .contains("kept the copy"));
+        assert_eq!(install_notice_message("something else"), None);
+    }
+
+    /// A per machine install has to be upgraded by Windows Installer unless
+    /// its owner chose to move to a per user install. Nothing is picked
+    /// before the owner has chosen.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_asset_follows_the_update_plan() {
+        let msi = "noir-player-2.0.0-windows-x64.msi";
+        let setup = "noir-player-2.0.0-windows-x64-setup.exe";
+        let assets = vec![asset(msi), asset(setup)];
+        let pick = |assets: &[ReleaseAsset], plan| {
+            windows_asset(assets, plan).map(|a: &ReleaseAsset| a.name.clone())
+        };
+        assert_eq!(pick(&assets, UpdatePlan::MachineMsi).as_deref(), Some(msi));
+        assert_eq!(
+            pick(&assets, UpdatePlan::PerUserSetup).as_deref(),
+            Some(setup)
+        );
+        assert_eq!(
+            pick(&assets, UpdatePlan::MigrateToPerUser).as_deref(),
+            Some(setup)
+        );
+        assert_eq!(pick(&assets, UpdatePlan::AskFirst), None);
+
+        let only_setup = vec![asset(setup)];
+        assert!(windows_asset(&only_setup, UpdatePlan::MachineMsi).is_some());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_migration_installs_per_user_then_removes_the_msi_copy() {
+        let setup = Path::new(r"C:\cache\noir-player-2.4.0-windows-x64-setup.exe");
+        let paths = MigrationPaths {
+            pid: 4242,
+            setup,
+            old_exe: Path::new(r"C:\Program Files\Noir Player\noir_player.exe"),
+            new_dir: Path::new(r"C:\Users\me\AppData\Local\Noir Player"),
+            product_code: Some("{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}"),
+            log: Path::new(r"C:\cache\update.install.log"),
+            notice: Path::new(r"C:\cache\install-notice.txt"),
+        };
+        let script = windows_migration_script(&paths);
+        let position = |needle: &str| {
+            script
+                .find(needle)
+                .unwrap_or_else(|| panic!("missing {needle:?} in\n{script}"))
+        };
+
+        // Waits for the running all-users copy to exit before anything else.
+        let wait = position(r#"\tasklist.exe /FI "PID eq 4242""#);
+        // Silent per user setup; /D= last and unquoted, as NSIS requires.
+        let install = position(
+            r#"start "" /wait "C:\cache\noir-player-2.4.0-windows-x64-setup.exe" /S /D=C:\Users\me\AppData\Local\Noir Player"#,
+        );
+        let checked = position(r#"if not "%SETUP_EXIT%"=="0" goto setupfailed"#);
+        // One elevated uninstall of the MSI copy, only after the setup worked.
+        let remove = position(
+            "-ArgumentList '/x','{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}','/qn','/norestart' -Verb RunAs -Wait -PassThru",
+        );
+        let declined = position(r#">"C:\cache\install-notice.txt" echo old-copy-remains"#);
+        let relaunch =
+            position(r#"start "" "C:\Users\me\AppData\Local\Noir Player\noir_player.exe""#);
+        assert!(wait < install && install < checked && checked < remove);
+        assert!(remove < declined && declined < relaunch);
+        assert_eq!(script.matches("-Verb RunAs").count(), 1);
+        assert!(script.contains(r#"if "%REMOVE_EXIT%"=="0" goto relaunch"#));
+
+        // A failed setup reopens the old copy and leaves it installed.
+        let failed = position(":setupfailed");
+        assert!(relaunch < failed);
+        assert!(script[failed..].contains(
+            r#"if exist "C:\Program Files\Noir Player\noir_player.exe" start "" "C:\Program Files\Noir Player\noir_player.exe""#
+        ));
+        assert!(!script[failed..].contains("msiexec"));
+        assert!(!script.contains(r"\\?\"));
+        assert!(script.contains(r#"del "%~f0""#));
+
+        // With no MSI copy registered there is nothing to elevate for.
+        let none = windows_migration_script(&MigrationPaths {
+            product_code: None,
+            ..paths
+        });
+        assert!(!none.contains("RunAs"));
+        assert!(
+            none.contains(r#"start "" "C:\Users\me\AppData\Local\Noir Player\noir_player.exe""#)
+        );
     }
 
     #[test]

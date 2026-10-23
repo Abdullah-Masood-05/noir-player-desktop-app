@@ -322,6 +322,12 @@ pub struct NoirPlayerModel {
     volume_settling: bool,
     pub update_status: crate::update::UpdateStatus,
     pub update_dialog_open: bool,
+    /// The first-time question on an all-users Windows copy: how should
+    /// updates install from now on.
+    pub install_prompt_open: bool,
+    pub install_prompt_focus_handle: FocusHandle,
+    /// Left by an update helper that could not finish, shown once.
+    pub install_notice: Option<String>,
     pub latest_release: Option<crate::update::ReleaseInfo>,
     update_job: Option<UpdateJob>,
     _subscriptions: Vec<Subscription>,
@@ -453,6 +459,9 @@ impl NoirPlayerModel {
             settings_selected_index: 0,
             update_status: crate::update::UpdateStatus::Idle,
             update_dialog_open: false,
+            install_prompt_open: false,
+            install_prompt_focus_handle: cx.focus_handle(),
+            install_notice: crate::update::take_install_notice(),
             latest_release: None,
             update_job: None,
             _subscriptions: subscriptions,
@@ -539,7 +548,7 @@ impl NoirPlayerModel {
                     Ok(Some(release)) => {
                         this.latest_release = Some(release.clone());
                         this.update_status = crate::update::UpdateStatus::Available(release);
-                        this.update_dialog_open = true;
+                        this.show_update_or_ask(cx);
                         // Works out how this copy was installed while the
                         // user reads the notes, rather than on the UI thread
                         // when they choose to download.
@@ -574,10 +583,21 @@ impl NoirPlayerModel {
         if self.update_job.is_some() {
             return;
         }
+        if crate::update::current_plan(self.store.update_install_type)
+            == Some(crate::update::UpdatePlan::AskFirst)
+        {
+            self.update_dialog_open = false;
+            self.install_prompt_open = true;
+            cx.notify();
+            return;
+        }
         let Some(release) = self.latest_release.clone() else {
             return;
         };
-        let Some(asset) = release.platform_asset().cloned() else {
+        let Some(asset) = release
+            .platform_asset(self.store.update_install_type)
+            .cloned()
+        else {
             self.update_status = crate::update::UpdateStatus::Error(format!(
                 "Release {} has no installer for this platform.",
                 release.tag_name
@@ -682,6 +702,56 @@ impl NoirPlayerModel {
         cx.notify();
     }
 
+    /// Shows a found update, first asking an all-users Windows copy that has
+    /// never chosen how updates should install.
+    fn show_update_or_ask(&mut self, cx: &mut Context<Self>) {
+        if crate::update::current_plan(self.store.update_install_type)
+            == Some(crate::update::UpdatePlan::AskFirst)
+        {
+            self.install_prompt_open = true;
+        } else {
+            self.update_dialog_open = true;
+        }
+        cx.notify();
+    }
+
+    /// Saves how Windows updates install. From the first-time question this
+    /// carries on to the update it was asked for.
+    pub fn choose_install_type(
+        &mut self,
+        choice: crate::app::store::InstallPreference,
+        cx: &mut Context<Self>,
+    ) {
+        if self.store.update_install_type != Some(choice) {
+            self.store.update_install_type = Some(choice);
+            self.save_current_store(cx);
+            // A downloaded installer may be the other kind; fetch the one that
+            // matches the new choice instead.
+            if let (crate::update::UpdateStatus::Ready(_), Some(release)) =
+                (&self.update_status, self.latest_release.clone())
+            {
+                self.update_status = crate::update::UpdateStatus::Available(release);
+            }
+        }
+        if self.install_prompt_open {
+            self.install_prompt_open = false;
+            self.update_dialog_open = self.latest_release.is_some();
+        }
+        cx.notify();
+    }
+
+    /// Closes the first-time question without saving anything; it is asked
+    /// again with the next update.
+    pub fn decide_install_type_later(&mut self, cx: &mut Context<Self>) {
+        self.install_prompt_open = false;
+        cx.notify();
+    }
+
+    pub fn dismiss_install_notice(&mut self, cx: &mut Context<Self>) {
+        self.install_notice = None;
+        cx.notify();
+    }
+
     /// Hands the verified installer to the platform and quits, so it can
     /// replace files this process is holding open. On Linux the package
     /// manager waits on a password prompt, so the installer is started off
@@ -691,12 +761,13 @@ impl NoirPlayerModel {
             return;
         };
         self.update_status = crate::update::UpdateStatus::Installing;
+        let preference = self.store.update_install_type;
         cx.notify();
 
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { crate::update::launch_installer(&path) })
+                .spawn(async move { crate::update::launch_installer(&path, preference) })
                 .await;
             let _ = this.update(cx, |this, cx| match result {
                 Ok(crate::update::InstallOutcome::Quit) => {
@@ -2275,7 +2346,13 @@ impl Render for NoirPlayerModel {
         let active_tab = self.active_tab;
         let dialog_layer = Root::render_dialog_layer(window, cx);
 
-        if self.equalizer_open {
+        if self.install_prompt_open || self.install_notice.is_some() {
+            // Enter and Escape answer the install question, so it holds focus
+            // even above Settings.
+            if !self.install_prompt_focus_handle.is_focused(window) {
+                window.focus(&self.install_prompt_focus_handle, cx);
+            }
+        } else if self.equalizer_open {
             if !self.equalizer_focus_handle.is_focused(window) {
                 window.focus(&self.equalizer_focus_handle, cx);
             }
@@ -2386,6 +2463,8 @@ impl Render for NoirPlayerModel {
                     && !this.settings_open
                     && !this.equalizer_open
                     && !this.update_dialog_open
+                    && !this.install_prompt_open
+                    && this.install_notice.is_none()
                 {
                     if k.eq_ignore_ascii_case("p") || k == " " || k.eq_ignore_ascii_case("space") {
                         this.toggle_play(cx);
@@ -2507,6 +2586,10 @@ impl Render for NoirPlayerModel {
             .when(self.update_dialog_open, |d| {
                 d.child(crate::views::update::render_update_modal(self, cx))
             })
+            .when(
+                self.install_prompt_open || self.install_notice.is_some(),
+                |d| d.child(crate::views::update::render_install_type_modal(self, cx)),
+            )
             .when(show_volume_hud, |d| {
                 d.child(volume_hud(self.volume, is_light))
             })

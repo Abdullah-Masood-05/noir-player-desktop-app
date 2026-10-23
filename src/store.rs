@@ -52,6 +52,22 @@ pub struct Store {
     /// (true = All, false = Off) but only `repeat` is ever written.
     #[serde(default, alias = "repeat_all", deserialize_with = "deserialize_repeat")]
     pub repeat: RepeatMode,
+    /// How updates install on Windows. `None` means the user has not been
+    /// asked yet; only an all-users copy ever asks.
+    #[serde(default, deserialize_with = "deserialize_install_preference")]
+    pub update_install_type: Option<InstallPreference>,
+}
+
+/// Where Windows updates install.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallPreference {
+    /// Per user, under the user's own folder, with no administrator prompt.
+    /// The recommended choice.
+    JustMe,
+    /// One copy under Program Files shared by every account on the PC, which
+    /// needs administrator permission for every update.
+    AllUsers,
 }
 
 /// What happens when a song finishes on its own.
@@ -100,6 +116,26 @@ where
         Stored::Legacy(true) => RepeatMode::All,
         Stored::Mode(mode) => mode,
         Stored::Legacy(false) | Stored::Other(_) => RepeatMode::Off,
+    })
+}
+
+/// An unrecognised value (a choice from a newer build, say) reads as not
+/// asked yet instead of rejecting the whole settings file.
+fn deserialize_install_preference<'de, D>(
+    deserializer: D,
+) -> Result<Option<InstallPreference>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Known(InstallPreference),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Option::<Stored>::deserialize(deserializer)? {
+        Some(Stored::Known(choice)) => Some(choice),
+        Some(Stored::Other(_)) | None => None,
     })
 }
 
@@ -153,6 +189,7 @@ impl Default for Store {
             rapidapi_key: String::new(),
             shuffle: false,
             repeat: RepeatMode::Off,
+            update_install_type: None,
         }
     }
 }
@@ -589,6 +626,36 @@ mod tests {
             })
             .unwrap();
             assert_eq!(json["repeat"], name);
+        }
+    }
+
+    #[test]
+    fn the_update_install_type_defaults_to_unasked_and_survives_a_save() {
+        let older: Store = serde_json::from_str(r#"{"playlists":[]}"#).unwrap();
+        assert_eq!(older.update_install_type, None);
+        let newer: Store =
+            serde_json::from_str(r#"{"update_install_type":"something_new"}"#).unwrap();
+        assert_eq!(newer.update_install_type, None);
+
+        let temp = TempDir::new();
+        let path = temp.0.join("install-type.json");
+        for (choice, name) in [
+            (InstallPreference::JustMe, "just_me"),
+            (InstallPreference::AllUsers, "all_users"),
+        ] {
+            let saved = Store {
+                update_install_type: Some(choice),
+                ..Store::default()
+            };
+            assert_eq!(
+                serde_json::to_value(&saved).unwrap()["update_install_type"],
+                name
+            );
+            saved.save(&path).unwrap();
+            assert_eq!(
+                Store::load(&path).unwrap().update_install_type,
+                Some(choice)
+            );
         }
     }
 

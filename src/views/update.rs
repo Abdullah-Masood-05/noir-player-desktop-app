@@ -20,6 +20,8 @@ pub fn render_update_modal(
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let release = model.latest_release.clone();
     let status = model.update_status.clone();
+    let migrating = crate::update::current_plan(model.store.update_install_type)
+        == Some(crate::update::UpdatePlan::MigrateToPerUser);
 
     let (version, name, notes, url) = match release {
         Some(ref r) => (
@@ -173,7 +175,7 @@ pub fn render_update_modal(
                                             .children(render_notes_content(&notes, is_light)),
                                     )),
                             )
-                            .children(progress_section(&status, is_light)),
+                            .children(progress_section(&status, migrating, is_light)),
                     )
                     .child(modal_footer(&status, url, is_light, cx)),
             )),
@@ -233,7 +235,7 @@ fn modal_header(is_light: bool, cx: &mut Context<NoirPlayerModel>) -> Div {
 }
 
 /// Progress, verification and error detail below the release notes.
-fn progress_section(status: &UpdateStatus, is_light: bool) -> Option<Div> {
+fn progress_section(status: &UpdateStatus, migrating: bool, is_light: bool) -> Option<Div> {
     let note = |text: String, tone: Hsla| {
         div()
             .text_xs()
@@ -291,6 +293,9 @@ fn progress_section(status: &UpdateStatus, is_light: bool) -> Option<Div> {
             v_flex().w_full().gap(px(4.0)).child(note(
                 if cfg!(target_os = "linux") && crate::update::installs_in_place() {
                     "Downloaded and verified. Installing asks for your password, then Noir Player reopens."
+                        .to_string()
+                } else if migrating {
+                    "Downloaded and verified. Noir Player will close, install just for you, ask Windows once to remove the all-users copy, then reopen."
                         .to_string()
                 } else if crate::update::installs_in_place() {
                     "Downloaded and verified. Noir Player will close while it installs, then reopen."
@@ -575,4 +580,265 @@ fn render_notes_content(notes: &str, is_light: bool) -> Vec<Div> {
             }
         })
         .collect()
+}
+
+/// Wording shared by the first-time question and the Settings choice.
+pub const JUST_ME_TITLE: &str = "Just for me (recommended)";
+pub const JUST_ME_DETAIL: &str = "No administrator prompts. The first update moves Noir Player into your user folder and asks for permission one last time to remove the all-users copy. Your library and playlists stay.";
+pub const ALL_USERS_TITLE: &str = "For all users";
+pub const ALL_USERS_DETAIL: &str = "Everyone on this PC uses the same copy. Windows asks for administrator permission on every update.";
+
+/// How the running copy was installed, in plain words.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn install_scope_line(scope: crate::update::InstallScope) -> &'static str {
+    match scope {
+        crate::update::InstallScope::PerUser => {
+            "This copy is installed: Just for you (no administrator needed)"
+        }
+        crate::update::InstallScope::PerMachine => {
+            "This copy is installed: For all users (Windows asks for administrator permission to install updates)"
+        }
+    }
+}
+
+/// The first-time question on an all-users Windows copy, or the one-time
+/// notice an update helper left behind. Enter takes the recommended choice;
+/// Escape decides later and saves nothing.
+pub fn render_install_type_modal(
+    model: &mut NoirPlayerModel,
+    cx: &mut Context<NoirPlayerModel>,
+) -> impl IntoElement {
+    use crate::app::store::InstallPreference;
+
+    let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
+    let notice = model.install_notice.clone();
+    let title_color = if is_light { c(0x18181B) } else { white(0.95) };
+    let body_color = if is_light { c(0x3F3F46) } else { white(0.8) };
+    let muted = if is_light { c(0x71717A) } else { white(0.5) };
+
+    let option =
+        |id: &'static str, title: &'static str, detail: &'static str, recommended: bool| {
+            v_flex()
+                .id(id)
+                .w_full()
+                .gap(px(3.0))
+                .px(px(12.0))
+                .py(px(10.0))
+                .rounded_xl()
+                .bg(dynamic_inner_surface(is_light))
+                .border(px(1.5))
+                .border_color(if recommended {
+                    red().alpha(0.75)
+                } else if is_light {
+                    c(0xE4E4E7)
+                } else {
+                    c(0x1E1E22)
+                })
+                .cursor_pointer()
+                .hover(|s| s.opacity(0.9))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(title_color)
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .line_height(relative(1.45))
+                        .text_color(muted)
+                        .child(detail),
+                )
+        };
+
+    let (heading, icon, body, footer) = match notice {
+        Some(message) => (
+            "About your update",
+            MusicIcon::Info,
+            v_flex().w_full().child(
+                div()
+                    .text_sm()
+                    .line_height(relative(1.5))
+                    .text_color(body_color)
+                    .child(message),
+            ),
+            h_flex().justify_end().child(
+                primary_button("install-notice-ok", "OK", MusicIcon::Check, is_light).on_click(
+                    cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.dismiss_install_notice(cx);
+                    }),
+                ),
+            ),
+        ),
+        None => (
+            "How should updates install?",
+            MusicIcon::User,
+            v_flex()
+                .w_full()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .text_sm()
+                        .line_height(relative(1.5))
+                        .text_color(body_color)
+                        .child(
+                            "Noir Player is installed for all users on this PC, so Windows asks \
+                             for administrator permission every time it updates. Choose how \
+                             updates should install from now on.",
+                        ),
+                )
+                .child(
+                    option("install-choice-me", JUST_ME_TITLE, JUST_ME_DETAIL, true).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.choose_install_type(InstallPreference::JustMe, cx);
+                        }),
+                    ),
+                )
+                .child(
+                    option(
+                        "install-choice-all",
+                        ALL_USERS_TITLE,
+                        ALL_USERS_DETAIL,
+                        false,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.choose_install_type(InstallPreference::AllUsers, cx);
+                    })),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(muted)
+                        .child("You can change this any time in Settings."),
+                ),
+            h_flex()
+                .justify_between()
+                .child(
+                    secondary_button("install-choice-later", "Decide later", is_light).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.decide_install_type_later(cx);
+                        }),
+                    ),
+                )
+                .child(
+                    h_flex()
+                        .gap(px(10.0))
+                        .child(
+                            secondary_button("install-choice-all-btn", ALL_USERS_TITLE, is_light)
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.choose_install_type(InstallPreference::AllUsers, cx);
+                                })),
+                        )
+                        .child(
+                            primary_button(
+                                "install-choice-me-btn",
+                                JUST_ME_TITLE,
+                                MusicIcon::Check,
+                                is_light,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.choose_install_type(InstallPreference::JustMe, cx);
+                            })),
+                        ),
+                ),
+        ),
+    };
+
+    backdrop_transition(
+        "install-type-backdrop-anim",
+        div()
+            .id("install-type-backdrop")
+            .track_focus(&model.install_prompt_focus_handle)
+            .absolute()
+            .inset_0()
+            .bg(rgba(if is_light { 0x00000066 } else { 0x000000CC }))
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_scroll_wheel(|_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                let k = event.keystroke.key.trim();
+                let escape = k.eq_ignore_ascii_case("escape") || k.eq_ignore_ascii_case("esc");
+                let enter = k.eq_ignore_ascii_case("enter") || k.eq_ignore_ascii_case("return");
+                // Every key stops here: the playback shortcuts underneath must
+                // not fire while the question is up.
+                cx.stop_propagation();
+                if this.install_notice.is_some() {
+                    if escape || enter {
+                        this.dismiss_install_notice(cx);
+                    }
+                } else if enter {
+                    this.choose_install_type(InstallPreference::JustMe, cx);
+                } else if escape {
+                    this.decide_install_type_later(cx);
+                }
+            }))
+            .child(modal_transition(
+                "install-type-modal-anim",
+                v_flex()
+                    .id("install-type-modal")
+                    .w(px(540.0))
+                    .rounded_2xl()
+                    .bg(dynamic_modal_surface(is_light))
+                    .border(px(1.0))
+                    .border_color(if is_light { c(0xE4E4E7) } else { c(0x2A2A2E) })
+                    .shadow(vec![BoxShadow::new(
+                        px(0.0),
+                        px(24.0),
+                        if is_light { c(0x00000033) } else { c(0x000000) },
+                    )
+                    .blur_radius(px(48.0))])
+                    .overflow_hidden()
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.stop_propagation();
+                    }))
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .items_center()
+                            .gap(px(10.0))
+                            .px(px(20.0))
+                            .py(px(14.0))
+                            .border_b(px(1.0))
+                            .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
+                            .child(
+                                div()
+                                    .size(px(32.0))
+                                    .rounded_lg()
+                                    .bg(red().alpha(0.18))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(red())
+                                    .child(icon_text(icon, 18.0)),
+                            )
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(title_color)
+                                    .child(heading),
+                            ),
+                    )
+                    .child(v_flex().w_full().px(px(20.0)).py(px(16.0)).child(body))
+                    .child(
+                        div()
+                            .w_full()
+                            .px(px(20.0))
+                            .py(px(14.0))
+                            .border_t(px(1.0))
+                            .border_color(if is_light { c(0xE4E4E7) } else { c(0x1E1E22) })
+                            .child(footer.w_full()),
+                    ),
+            )),
+    )
 }

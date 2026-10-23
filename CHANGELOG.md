@@ -4,6 +4,12 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.4.1]
+
+Version 2.4.1 is a small maintenance release with no changes to how Noir
+Player works. It installs over 2.4.0 without an administrator prompt,
+whichever installer you used.
+
 ## [2.4.0]
 
 Version 2.4.0 installs updates on Windows without administrator prompts.

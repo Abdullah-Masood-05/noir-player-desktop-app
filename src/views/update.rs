@@ -72,6 +72,7 @@ pub fn render_update_modal(
                 "update-modal-anim",
                 v_flex()
                     .id("update-modal")
+                    .track_focus(&model.update_focus_handle)
                     .w(px(540.0))
                     .max_h(px(520.0))
                     .rounded_2xl()

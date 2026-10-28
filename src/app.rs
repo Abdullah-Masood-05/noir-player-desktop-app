@@ -258,6 +258,12 @@ pub struct NoirPlayerModel {
     /// O(1) favourite lookup for the song list. Rebuilt whenever the store
     /// is replaced; the serialized `Vec` stays the source of truth.
     favourites_set: std::collections::HashSet<PathBuf>,
+    /// Bumped whenever the library or the saved store is replaced, so data
+    /// derived from them can be cached and invalidated cheaply.
+    data_generation: u64,
+    /// The playlist page's unavailable files, keyed on `data_generation` and
+    /// the playlist name, so renders (every playback tick) just read it.
+    playlist_missing_cache: Option<(u64, String, std::rc::Rc<[PathBuf]>)>,
     /// Covers belonging to a library that has been replaced, waiting for a frame
     /// to release their renderer textures on. Those outlive the images
     /// themselves and only go away when the window is told, and the library is
@@ -329,6 +335,9 @@ pub struct NoirPlayerModel {
     volume_settling: bool,
     pub update_status: crate::update::UpdateStatus,
     pub update_dialog_open: bool,
+    /// Held by the update dialog while it is open, so its own Escape handler
+    /// runs even when it opened over Settings.
+    pub update_focus_handle: FocusHandle,
     pub install_notice_focus_handle: FocusHandle,
     /// Left by an update helper that could not finish, shown once.
     pub install_notice: Option<String>,
@@ -438,6 +447,8 @@ impl NoirPlayerModel {
             discover_downloads: Vec::new(),
             song_menu: None,
             resume_attempted: false,
+            data_generation: 0,
+            playlist_missing_cache: None,
             sort_mode: SortMode::TitleAsc,
             sort_menu_open: false,
             media_menu_open: false,
@@ -463,6 +474,7 @@ impl NoirPlayerModel {
             settings_selected_index: 0,
             update_status: crate::update::UpdateStatus::Idle,
             update_dialog_open: false,
+            update_focus_handle: cx.focus_handle(),
             install_notice_focus_handle: cx.focus_handle(),
             install_notice: crate::update::take_install_notice(),
             latest_release: None,
@@ -995,6 +1007,7 @@ impl NoirPlayerModel {
         album_map.sort_by_key(|a| a.0.to_lowercase());
         artist_map.sort_by_key(|a| a.0.to_lowercase());
         self.tracks = tracks;
+        self.data_generation = self.data_generation.wrapping_add(1);
         self.albums = album_map;
         self.artists = artist_map;
         self.queue = store::resolve_paths(&queue_paths, &self.tracks);
@@ -1040,6 +1053,34 @@ impl NoirPlayerModel {
                 .map(|(index, _)| index)
                 .collect(),
         }
+    }
+
+    /// The saved paths of playlist `name` that are not in the library, in
+    /// playlist order. Cached until the library or the store changes.
+    pub fn playlist_missing(&mut self, name: &str) -> std::rc::Rc<[PathBuf]> {
+        if let Some((generation, cached_name, missing)) = &self.playlist_missing_cache {
+            if *generation == self.data_generation && cached_name == name {
+                return missing.clone();
+            }
+        }
+        let library: std::collections::HashSet<&std::path::Path> = self
+            .tracks
+            .iter()
+            .map(|track| track.path.as_path())
+            .collect();
+        let missing: std::rc::Rc<[PathBuf]> = self
+            .store
+            .playlists
+            .iter()
+            .find(|playlist| playlist.name == name)
+            .into_iter()
+            .flat_map(|playlist| &playlist.paths)
+            .filter(|path| !library.contains(path.as_path()))
+            .cloned()
+            .collect();
+        self.playlist_missing_cache =
+            Some((self.data_generation, name.to_string(), missing.clone()));
+        missing
     }
 
     pub fn filtered_indices(&self, indices: Vec<usize>, cx: &App) -> Vec<usize> {
@@ -1464,6 +1505,7 @@ impl NoirPlayerModel {
         match result {
             Ok(()) => {
                 self.store = next;
+                self.data_generation = self.data_generation.wrapping_add(1);
                 self.rebuild_favourite_set();
                 self.error = None;
                 cx.notify();
@@ -2324,6 +2366,12 @@ impl Render for NoirPlayerModel {
             if !self.install_notice_focus_handle.is_focused(window) {
                 window.focus(&self.install_notice_focus_handle, cx);
             }
+        } else if self.update_dialog_open {
+            // Drawn above Settings and the equalizer; once it closes, the
+            // branches below hand focus back to whatever is underneath.
+            if !self.update_focus_handle.is_focused(window) {
+                window.focus(&self.update_focus_handle, cx);
+            }
         } else if self.equalizer_open {
             if !self.equalizer_focus_handle.is_focused(window) {
                 window.focus(&self.equalizer_focus_handle, cx);
@@ -2494,14 +2542,16 @@ impl Render for NoirPlayerModel {
                             .child(crate::views::ui::tab_transition(
                                 format!("main-tab-{active_tab:?}"),
                                 match active_tab {
-                                    ActiveTab::Playlists => playlists::render_playlists(self, cx),
+                                    ActiveTab::Playlists => {
+                                        playlists::render_playlists(self, window, cx)
+                                    }
                                     ActiveTab::Discover => discover::render_discover(self, cx),
                                     _ => library::render_library(self, window, cx),
                                 },
                             )),
                     )
                     .when(self.queue_open, |d| {
-                        d.child(queue_panel::queue_panel(self, cx))
+                        d.child(queue_panel::queue_panel(self, window, cx))
                     })
                     .when(!self.queue_open, |d| {
                         d.child(queue_panel::queue_handle(self, cx))

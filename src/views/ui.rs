@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use gpui_kit::component::scroll::ScrollbarMode;
 use gpui_kit::component::{h_flex, Theme, ThemeMode};
 use gpui_kit::*;
 
@@ -60,6 +61,10 @@ pub fn apply_theme(mode: &str, cx: &mut App) {
         theme.muted_foreground = rgb(0xFFFFFF).alpha(0.55).into();
         theme.border = rgb(0x2A2A2A).into();
     }
+    // Hover, not the OS-synced default: under Windows' auto-hide setting the
+    // default is `Scrolling`, whose faded scrollbar cannot be brought back by
+    // hovering it. Set on every theme switch so it holds whatever ran before.
+    Theme::set_scrollbar_mode(ScrollbarMode::Hover, cx);
     Theme::sync_base(cx);
 }
 

@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName as MusicIcon;
-use gpui_kit::base::{v_virtual_list, VirtualListScrollHandle};
+use gpui_kit::base::{v_virtual_list, VirtualList, VirtualListScrollHandle};
 use gpui_kit::component::input::Input;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::*;
@@ -510,6 +510,7 @@ fn songs_page(
         &indices,
         queue,
         None,
+        None,
         window,
         is_light,
         cx,
@@ -548,6 +549,7 @@ fn collection_detail(
         None,
         &indices,
         queue,
+        None,
         None,
         window,
         is_light,
@@ -796,15 +798,29 @@ pub fn see_all_link(
 enum SongListRow {
     Heading(char, usize),
     Song { index: usize, position: usize },
+    Trailing(usize),
+}
+
+/// Builds one trailing row by its position among the trailing rows.
+pub type TrailingRowRender = Rc<dyn Fn(usize, &mut Context<NoirPlayerModel>) -> AnyElement>;
+
+/// Fixed-height rows appended after the songs of a virtual song list (the
+/// playlist page's unavailable files), built only while visible.
+pub struct TrailingRows {
+    pub height: f32,
+    pub count: usize,
+    pub render: TrailingRowRender,
 }
 
 fn flatten_rows(
     model: &NoirPlayerModel,
     indices: &[usize],
+    trailing: Option<&TrailingRows>,
 ) -> (Vec<SongListRow>, Rc<Vec<GpuiSize<Pixels>>>) {
     let sections = model.letter_sections_slice(indices);
-    let mut rows = Vec::with_capacity(indices.len() + sections.len());
-    let mut sizes = Vec::with_capacity(indices.len() + sections.len());
+    let extra = sections.len() + trailing.map_or(0, |rows| rows.count);
+    let mut rows = Vec::with_capacity(indices.len() + extra);
+    let mut sizes = Vec::with_capacity(indices.len() + extra);
     let mut position = 0usize;
     for (letter, songs) in &sections {
         if let Some(letter) = letter {
@@ -817,33 +833,74 @@ fn flatten_rows(
             sizes.push(size(px(800.0), px(ROW_HEIGHT)));
         }
     }
+    if let Some(trailing) = trailing {
+        for row in 0..trailing.count {
+            rows.push(SongListRow::Trailing(row));
+            sizes.push(size(px(800.0), px(trailing.height)));
+        }
+    }
     (rows, Rc::new(sizes))
 }
 
+/// The scroll handle for a virtual list, kept across renders.
+///
+/// It must survive re-renders, or the list snaps back to the top on every
+/// one — which happens every tick while a song plays. `use_keyed_state` is
+/// the same mechanism `SmoothScroll` uses for exactly this reason: a fresh
+/// `VirtualListScrollHandle` each render would carry a fresh, zeroed offset.
+pub fn keyed_virtual_scroll(
+    list_id: &ElementId,
+    window: &mut Window,
+    cx: &mut App,
+) -> VirtualListScrollHandle {
+    window
+        .use_keyed_state((list_id.clone(), "vlist-scroll"), cx, |_, _| {
+            VirtualListScrollHandle::new()
+        })
+        .read(cx)
+        .clone()
+}
+
+/// Wraps a virtual list with a visible, draggable scrollbar overlay, matching
+/// every other scrollable view in the app (`smooth_scroll` pairs one the same
+/// way).
+pub fn with_virtual_scrollbar(
+    list: VirtualList,
+    handle: &VirtualListScrollHandle,
+    list_id: ElementId,
+) -> AnyElement {
+    div()
+        .relative()
+        .size_full()
+        .child(list)
+        .child(
+            div().absolute().inset_0().child(
+                Scrollbar::vertical(handle)
+                    .id((list_id, "scrollbar"))
+                    .viewport_from_layout(),
+            ),
+        )
+        .into_any_element()
+}
+
 #[allow(clippy::too_many_arguments)]
-fn virtual_song_list(
+pub fn virtual_song_list(
     model: &NoirPlayerModel,
     list_id: impl Into<ElementId>,
     indices: &[usize],
     queue: Rc<[usize]>,
     playlist: Option<SharedString>,
+    trailing: Option<TrailingRows>,
     window: &mut Window,
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
 ) -> AnyElement {
     let list_id: ElementId = list_id.into();
-    // The scroll handle must survive across renders, or the list snaps back
-    // to the top on every re-render — which happens every tick while a song
-    // plays. `use_keyed_state` is the same mechanism `SmoothScroll` uses for
-    // exactly this reason: a fresh `VirtualListScrollHandle` each render
-    // would carry a fresh, zeroed offset.
-    let handle_state = window.use_keyed_state((list_id.clone(), "vlist-scroll"), cx, |_, _| {
-        VirtualListScrollHandle::new()
-    });
-    let handle = handle_state.read(cx).clone();
+    let handle = keyed_virtual_scroll(&list_id, window, cx);
 
-    let (rows, item_sizes) = flatten_rows(model, indices);
+    let (rows, item_sizes) = flatten_rows(model, indices, trailing.as_ref());
     let rows = Rc::new(rows);
+    let trailing = trailing.map(|rows| rows.render);
     let view = cx.entity();
     let list = v_virtual_list(
         view,
@@ -864,32 +921,23 @@ fn virtual_song_list(
                         is_light,
                         cx,
                     ),
+                    SongListRow::Trailing(row) => match &trailing {
+                        Some(render) => render(row, cx),
+                        None => div().into_any_element(),
+                    },
                 })
                 .collect::<Vec<_>>()
         },
     )
     .track_scroll(&handle);
 
-    // A visible, draggable scrollbar overlay, matching every other scrollable
-    // view in the app (`smooth_scroll` pairs one the same way).
-    div()
-        .relative()
-        .size_full()
-        .child(list)
-        .child(
-            div().absolute().inset_0().child(
-                Scrollbar::vertical(&handle)
-                    .id((list_id, "scrollbar"))
-                    .viewport_from_layout(),
-            ),
-        )
-        .into_any_element()
+    with_virtual_scrollbar(list, &handle, list_id)
 }
 
 /// A fixed title + column header with a virtualized list filling the rest of
 /// the view. Only the visible rows are built per frame.
 #[allow(clippy::too_many_arguments)]
-fn virtual_song_section(
+pub fn virtual_song_section(
     model: &NoirPlayerModel,
     list_id: impl Into<ElementId>,
     title: &str,
@@ -897,6 +945,7 @@ fn virtual_song_section(
     indices: &[usize],
     queue: Rc<[usize]>,
     playlist: Option<SharedString>,
+    trailing_rows: Option<TrailingRows>,
     window: &mut Window,
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
@@ -925,38 +974,21 @@ fn virtual_song_section(
         )
         .child(column_header(is_light))
         .child(div().w_full().flex_1().min_h_0().child(virtual_song_list(
-            model, list_id, indices, queue, playlist, window, is_light, cx,
+            model,
+            list_id,
+            indices,
+            queue,
+            playlist,
+            trailing_rows,
+            window,
+            is_light,
+            cx,
         )))
         .into_any_element()
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn song_table(
-    model: &NoirPlayerModel,
-    title: &str,
-    see_all: Option<AnyElement>,
-    indices: Vec<usize>,
-    playlist: Option<String>,
-    is_light: bool,
-    cx: &mut Context<NoirPlayerModel>,
-) -> AnyElement {
-    // One shared queue for every row: an Rc bump per row instead of a full
-    // Vec memcpy per row per frame.
-    let queue: Rc<[usize]> = Rc::from(indices.as_slice());
-    song_table_inner(
-        model,
-        title,
-        see_all,
-        &indices,
-        queue,
-        playlist.map(SharedString::from),
-        is_light,
-        cx,
-    )
-}
-
-/// Fully rendered (non-virtualized) song list for bounded surfaces: the home
-/// preview and playlist details.
+/// Fully rendered (non-virtualized) song list for the home preview, which is
+/// bounded to `HOME_PREVIEW_ROWS` and scrolls with the hero and shelf.
 #[allow(clippy::too_many_arguments)]
 fn song_table_inner(
     model: &NoirPlayerModel,

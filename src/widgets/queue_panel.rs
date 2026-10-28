@@ -1,22 +1,34 @@
+use std::rc::Rc;
+
 use gpui_kit::assets::IconName as MusicIcon;
+use gpui_kit::base::v_virtual_list;
 use gpui_kit::component::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::app::NoirPlayerModel;
-use crate::views::library::artwork_thumb;
+use crate::views::library::{artwork_thumb, keyed_virtual_scroll, with_virtual_scrollbar};
 use crate::views::ui::{
     bottom_aura, dynamic_border, dynamic_muted, dynamic_panel, dynamic_row_hover, dynamic_subtitle,
-    dynamic_text, format_duration, icon_text, red, red_a, smooth_scroll, waveform,
+    dynamic_text, format_duration, icon_text, red, red_a, waveform,
 };
 
 pub const QUEUE_WIDTH: f32 = 302.0;
+/// Every queue row is pinned to this height so the virtual list's fixed
+/// sizes match what is drawn: 8px padding around the three-line text column.
+const QUEUE_ROW_HEIGHT: f32 = 82.0;
+const QUEUE_LIST_PADDING: f32 = 10.0;
 
 /// The docked "Up Next" rail beside the library.
-pub fn queue_panel(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -> Div {
+pub fn queue_panel(
+    model: &NoirPlayerModel,
+    window: &mut Window,
+    cx: &mut Context<NoirPlayerModel>,
+) -> Div {
     let is_light = matches!(cx.theme().mode, gpui_kit::component::ThemeMode::Light);
     let upcoming = model.upcoming_queue();
     let shuffle = model.store.shuffle;
+    let has_upcoming = !upcoming.is_empty();
 
     v_flex()
         .w(px(QUEUE_WIDTH))
@@ -63,7 +75,7 @@ pub fn queue_panel(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -
                         )),
                 ),
         )
-        .child(if upcoming.is_empty() {
+        .child(if !has_upcoming {
             v_flex()
                 .flex_1()
                 .min_h_0()
@@ -92,18 +104,9 @@ pub fn queue_panel(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) -
                 )
                 .into_any_element()
         } else {
-            smooth_scroll(
-                "queue-scroll",
-                div().px(px(10.0)).pb(px(10.0)).children(
-                    upcoming
-                        .iter()
-                        .enumerate()
-                        .map(|(position, &index)| queue_row(model, position, index, is_light, cx)),
-                ),
-            )
-            .into_any_element()
+            queue_list(upcoming, window, is_light, cx)
         })
-        .when(!upcoming.is_empty(), |panel| {
+        .when(has_upcoming, |panel| {
             panel.child(
                 div().flex_shrink_0().p(px(12.0)).child(
                     h_flex()
@@ -170,9 +173,48 @@ pub fn queue_handle(model: &NoirPlayerModel, cx: &mut Context<NoirPlayerModel>) 
         )
 }
 
+/// The upcoming songs as a virtual list: only the visible rows are built,
+/// however long the queue is. The scroll handle is keyed, so the list keeps
+/// its place across the per-tick re-renders while a song plays.
+fn queue_list(
+    upcoming: Vec<usize>,
+    window: &mut Window,
+    is_light: bool,
+    cx: &mut Context<NoirPlayerModel>,
+) -> AnyElement {
+    let list_id = ElementId::from("queue-scroll");
+    let handle = keyed_virtual_scroll(&list_id, window, cx);
+    let sizes = Rc::new(vec![
+        size(
+            px(QUEUE_WIDTH - 2.0 * QUEUE_LIST_PADDING),
+            px(QUEUE_ROW_HEIGHT)
+        );
+        upcoming.len()
+    ]);
+    let list = v_virtual_list(
+        cx.entity(),
+        list_id.clone(),
+        sizes,
+        move |this, range, _, cx| {
+            range
+                .map(|position| queue_row(this, upcoming[position], is_light, cx))
+                .collect::<Vec<_>>()
+        },
+    )
+    .track_scroll(&handle)
+    .px(px(QUEUE_LIST_PADDING))
+    .pb(px(QUEUE_LIST_PADDING));
+
+    div()
+        .w_full()
+        .flex_1()
+        .min_h_0()
+        .child(with_virtual_scrollbar(list, &handle, list_id))
+        .into_any_element()
+}
+
 fn queue_row(
     model: &NoirPlayerModel,
-    position: usize,
     index: usize,
     is_light: bool,
     cx: &mut Context<NoirPlayerModel>,
@@ -186,7 +228,12 @@ fn queue_row(
     let playing_now = model.is_playing;
 
     h_flex()
-        .id(SharedString::from(format!("queue-row-{position}-{index}")))
+        // The queue holds each track at most once, so the track index alone
+        // is a stable, unique id as songs advance and rows shift.
+        .id(("queue-row", index))
+        .w_full()
+        .h(px(QUEUE_ROW_HEIGHT))
+        .flex_shrink_0()
         .items_center()
         .gap(px(10.0))
         .p(px(8.0))

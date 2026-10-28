@@ -4,6 +4,25 @@ Release notes are scoped to the version in `Cargo.toml`. A section here does not
 
 ## [Unreleased]
 
+## [2.4.2]
+
+Version 2.4.2 keeps long playlists and the queue smooth, and makes the
+scrollbar easier to reach.
+
+### Improvements
+
+- **Long Playlists and Queues Stay Smooth**: The playlist page and the Up Next
+  queue only draw the songs you can see, like the main song lists, so a
+  playlist or queue with thousands of songs scrolls without stalling.
+- **Scrollbars Appear When You Point at Them**: Moving the mouse over the edge
+  of a list shows its scrollbar again after it fades out, so you can grab it
+  without scrolling first.
+
+### Fixes
+
+- **Escape Closes the Update Dialog First**: With the update dialog open over
+  Settings, Escape closes the dialog before Settings.
+
 ## [2.4.1]
 
 Version 2.4.1 is a small maintenance release with no changes to how Noir

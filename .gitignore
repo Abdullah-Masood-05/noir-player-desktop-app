@@ -8,3 +8,5 @@ dist/
 dist-*/
 ci-installers/
 .claude/
+
+skills-lock.json
